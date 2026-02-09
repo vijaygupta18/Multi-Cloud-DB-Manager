@@ -56,6 +56,7 @@ export const authAPI = {
 
   logout: async (): Promise<void> => {
     await api.post('/api/auth/logout');
+    localStorage.clear();
   },
 
   listUsers: async (): Promise<{ users: any[] }> => {

@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import queryService from '../services/query.service';
 import historyService from '../services/history.service';
+import DatabasePools from '../config/database';
 import logger from '../utils/logger';
 import { AppError } from '../middleware/error.middleware';
 import { QueryRequest } from '../types';
@@ -21,6 +22,22 @@ export const executeQuery = async (
     const validation = queryService.validateQuery(queryRequest.query);
     if (!validation.valid) {
       throw new AppError(validation.error || 'Invalid query', 400);
+    }
+
+    // Validate database and mode against actual configuration
+    const cloudConfig = DatabasePools.getInstance().getCloudConfig();
+    const allDatabases = [
+      ...cloudConfig.primaryDatabases.map(d => d.databaseName),
+      ...Object.values(cloudConfig.secondaryDatabases).flat().map(d => d.databaseName)
+    ];
+    const allClouds = [cloudConfig.primaryCloud, ...cloudConfig.secondaryClouds];
+
+    if (!allDatabases.includes(queryRequest.database)) {
+      throw new AppError(`Invalid database: ${queryRequest.database}`, 400);
+    }
+
+    if (queryRequest.mode !== 'both' && !allClouds.includes(queryRequest.mode)) {
+      throw new AppError(`Invalid execution mode: ${queryRequest.mode}`, 400);
     }
 
     logger.info('Query execution requested', {

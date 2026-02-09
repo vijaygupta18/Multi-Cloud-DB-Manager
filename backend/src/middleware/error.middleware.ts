@@ -40,6 +40,11 @@ export const errorHandler = (
     ...(process.env.NODE_ENV !== 'production' && { stack: err.stack }),
   };
 
+  if (res.headersSent) {
+    logger.error('Headers already sent, cannot send error response');
+    return next(err);
+  }
+
   res.status(statusCode).json(response);
 };
 

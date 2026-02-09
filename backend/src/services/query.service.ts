@@ -437,12 +437,23 @@ class QueryService {
       return { valid: false, error: 'Query is empty' };
     }
 
-    // Check for dangerous commands (customize based on your needs)
+    // Block dangerous/destructive commands
     const dangerousPatterns = [
       /^\s*DROP\s+DATABASE/i,
       /^\s*DROP\s+SCHEMA/i,
       /^\s*CREATE\s+DATABASE/i,
       /^\s*CREATE\s+SCHEMA/i,
+      /^\s*TRUNCATE/i,
+      /^\s*DROP\s+TABLE/i,
+      /^\s*DROP\s+INDEX/i,
+      /^\s*GRANT/i,
+      /^\s*REVOKE/i,
+      /^\s*ALTER\s+ROLE/i,
+      /^\s*ALTER\s+USER/i,
+      /^\s*CREATE\s+ROLE/i,
+      /^\s*CREATE\s+USER/i,
+      /^\s*DROP\s+ROLE/i,
+      /^\s*DROP\s+USER/i,
     ];
 
     for (const pattern of dangerousPatterns) {

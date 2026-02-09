@@ -16,7 +16,7 @@ CREATE TABLE IF NOT EXISTS dual_db_manager.users (
     password_hash TEXT NOT NULL,
     email VARCHAR(255) NOT NULL UNIQUE,
     name VARCHAR(255) NOT NULL,
-    role VARCHAR(50) NOT NULL DEFAULT 'READER',
+    role VARCHAR(50) NOT NULL DEFAULT 'READER' CHECK (role IN ('MASTER', 'USER', 'READER')),
     is_active BOOLEAN DEFAULT false,
     picture TEXT,
     created_at TIMESTAMP NOT NULL DEFAULT NOW(),

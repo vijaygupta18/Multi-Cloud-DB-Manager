@@ -40,7 +40,7 @@ export const activateUsers = async (req: Request, res: Response) => {
     res.json({ message: `Activated ${result.rowCount} users`, users: result.rows });
   } catch (error) {
     logger.error('Activation error:', error);
-    res.status(500).json({ error: 'Activation failed' });
+    return res.status(500).json({ error: 'Activation failed' });
   }
 };
 
@@ -60,7 +60,7 @@ export const deactivateUsers = async (req: Request, res: Response) => {
     res.json({ message: `Deactivated ${result.rowCount} users`, users: result.rows });
   } catch (error) {
     logger.error('Deactivation error:', error);
-    res.status(500).json({ error: 'Deactivation failed' });
+    return res.status(500).json({ error: 'Deactivation failed' });
   }
 };
 
@@ -83,7 +83,7 @@ export const changeUserRole = async (req: Request, res: Response) => {
     res.json({ message: 'Role updated', user: result.rows[0] });
   } catch (error) {
     logger.error('Role change error:', error);
-    res.status(500).json({ error: 'Role change failed' });
+    return res.status(500).json({ error: 'Role change failed' });
   }
 };
 
@@ -97,7 +97,7 @@ export const listUsers = async (req: Request, res: Response) => {
     res.json({ users: result.rows });
   } catch (error) {
     logger.error('List users error:', error);
-    res.status(500).json({ error: 'Failed to list users' });
+    return res.status(500).json({ error: 'Failed to list users' });
   }
 };
 export const register = async (req: Request, res: Response) => {
@@ -117,7 +117,7 @@ export const register = async (req: Request, res: Response) => {
     const historyPool = dbPools.history;
     const result = await historyPool.query(
       `INSERT INTO dual_db_manager.users (username, password_hash, email, name, role, is_active)
-       VALUES ($1, $2, $3, $4, 'USER', false) RETURNING id, username, email, name, role, is_active`,
+       VALUES ($1, $2, $3, $4, 'READER', false) RETURNING id, username, email, name, role, is_active`,
       [username, passwordHash, email, name]
     );
     logger.info('User registered', { username });
@@ -130,7 +130,7 @@ export const register = async (req: Request, res: Response) => {
       return res.status(409).json({ error: 'Username or email already exists' });
     }
     logger.error('Registration error:', error);
-    res.status(500).json({ error: 'Registration failed', message: error.message });
+    return res.status(500).json({ error: 'Registration failed', message: error.message });
   }
 };
 export const login = async (req: Request, res: Response) => {
@@ -161,6 +161,6 @@ export const login = async (req: Request, res: Response) => {
     res.json({ message: 'Login successful', user: { id: user.id, username: user.username, email: user.email, name: user.name, role: user.role, picture: user.picture || '' } });
   } catch (error: any) {
     logger.error('Login error:', error);
-    res.status(500).json({ error: 'Login failed', message: error.message });
+    return res.status(500).json({ error: 'Login failed', message: error.message });
   }
 };

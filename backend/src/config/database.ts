@@ -14,6 +14,9 @@ const createPoolConfig = (dbConfig: DatabaseConfig | DatabaseInfo): PgPoolConfig
   password: dbConfig.password,
   database: dbConfig.database,
 
+  // SSL for databases that require encrypted connections (e.g., GCP pg_hba.conf)
+  ssl: { rejectUnauthorized: false },
+
   // Connection pool settings for high reliability
   max: 20, // Maximum connections
   min: 2, // Minimum idle connections
