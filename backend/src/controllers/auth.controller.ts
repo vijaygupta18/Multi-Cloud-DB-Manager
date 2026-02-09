@@ -133,6 +133,55 @@ export const register = async (req: Request, res: Response) => {
     return res.status(500).json({ error: 'Registration failed', message: error.message });
   }
 };
+export const deleteUser = async (req: Request, res: Response) => {
+  try {
+    const { username } = req.body;
+    if (!username || typeof username !== 'string') {
+      return res.status(400).json({ error: 'Username is required' });
+    }
+
+    // Prevent deleting yourself
+    const currentUser = (req as any).user;
+    if (username === currentUser?.username) {
+      return res.status(400).json({ error: 'Cannot delete your own account' });
+    }
+
+    const dbPools = DatabasePools.getInstance();
+    const historyPool = dbPools.history;
+
+    // Validate user exists and check their role
+    const userCheck = await historyPool.query(
+      `SELECT id, username, role FROM dual_db_manager.users WHERE username = $1`,
+      [username]
+    );
+    if (userCheck.rows.length === 0) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    const targetUser = userCheck.rows[0];
+
+    // Cannot delete a MASTER role user
+    if (targetUser.role === 'MASTER') {
+      return res.status(403).json({ error: 'Cannot delete a MASTER user. Demote them first.' });
+    }
+
+    const result = await historyPool.query(
+      `DELETE FROM dual_db_manager.users WHERE username = $1 AND role != 'MASTER' RETURNING username`,
+      [username]
+    );
+
+    if (result.rowCount === 0) {
+      return res.status(400).json({ error: 'Could not delete user' });
+    }
+
+    logger.info('User deleted', { deletedBy: currentUser?.username, deletedUser: username });
+    return res.json({ message: `User ${username} deleted` });
+  } catch (error) {
+    logger.error('Delete user error:', error);
+    return res.status(500).json({ error: 'Failed to delete user' });
+  }
+};
+
 export const login = async (req: Request, res: Response) => {
   try {
     const { username, password } = req.body;

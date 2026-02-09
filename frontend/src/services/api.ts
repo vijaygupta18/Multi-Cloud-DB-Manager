@@ -75,6 +75,10 @@ export const authAPI = {
   changeRole: async (username: string, role: 'MASTER' | 'USER' | 'READER'): Promise<void> => {
     await api.post('/api/auth/change-role', { username, role });
   },
+
+  deleteUser: async (username: string): Promise<void> => {
+    await api.post('/api/auth/delete', { username });
+  },
 };
 
 // Query API

@@ -24,6 +24,7 @@ import {
 } from '@mui/material';
 import LogoutIcon from '@mui/icons-material/Logout';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
+import DeleteIcon from '@mui/icons-material/Delete';
 import { authAPI } from '../services/api';
 import { useAppStore } from '../store/appStore';
 import toast from 'react-hot-toast';
@@ -128,6 +129,19 @@ const UsersPage = () => {
       await fetchUsers();
     } catch (error) {
       toast.error('Failed to change user role');
+    }
+  };
+
+  const handleDelete = async (username: string) => {
+    if (!confirm(`Are you sure you want to delete user "${username}"? This cannot be undone.`)) {
+      return;
+    }
+    try {
+      await authAPI.deleteUser(username);
+      toast.success(`User ${username} deleted`);
+      await fetchUsers();
+    } catch (error) {
+      toast.error('Failed to delete user');
     }
   };
 
@@ -254,18 +268,28 @@ const UsersPage = () => {
                           Protected
                         </Typography>
                       ) : (
-                        <Button
-                          variant="outlined"
-                          size="small"
-                          color={userData.is_active ? 'error' : 'success'}
-                          onClick={() =>
-                            userData.is_active
-                              ? handleDeactivate(userData.username)
-                              : handleActivate(userData.username)
-                          }
-                        >
-                          {userData.is_active ? 'Deactivate' : 'Activate'}
-                        </Button>
+                        <Stack direction="row" spacing={1} justifyContent="center">
+                          <Button
+                            variant="outlined"
+                            size="small"
+                            color={userData.is_active ? 'error' : 'success'}
+                            onClick={() =>
+                              userData.is_active
+                                ? handleDeactivate(userData.username)
+                                : handleActivate(userData.username)
+                            }
+                          >
+                            {userData.is_active ? 'Deactivate' : 'Activate'}
+                          </Button>
+                          <IconButton
+                            size="small"
+                            color="error"
+                            onClick={() => handleDelete(userData.username)}
+                            title="Delete user"
+                          >
+                            <DeleteIcon fontSize="small" />
+                          </IconButton>
+                        </Stack>
                       )}
                     </TableCell>
                   </TableRow>

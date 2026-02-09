@@ -7,6 +7,7 @@ import {
   activateUsers,
   deactivateUsers,
   changeUserRole,
+  deleteUser,
   listUsers
 } from '../controllers/auth.controller';
 import { isAuthenticated, requireMaster } from '../middleware/auth.middleware';
@@ -37,6 +38,9 @@ router.post('/deactivate', isAuthenticated, requireMaster, deactivateUsers);
 
 console.log('[AUTH ROUTES] Registering POST /change-role route (MASTER only)');
 router.post('/change-role', isAuthenticated, requireMaster, changeUserRole);
+
+console.log('[AUTH ROUTES] Registering POST /delete route (MASTER only)');
+router.post('/delete', isAuthenticated, requireMaster, deleteUser);
 
 console.log('[AUTH ROUTES] Registering GET /users route (MASTER only)');
 router.get('/users', isAuthenticated, requireMaster, listUsers);
