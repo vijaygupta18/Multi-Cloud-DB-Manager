@@ -38,7 +38,7 @@ interface DatabaseOption {
   defaultSchema: string;
 }
 
-const POLL_INTERVAL = 1500; // 1.5 seconds
+const POLL_INTERVAL = 1000; // 1 second polling
 
 const DatabaseSelector = ({ onExecute }: DatabaseSelectorProps) => {
   const {
