@@ -1,0 +1,194 @@
+import logger from '../../utils/logger';
+
+/**
+ * QueryValidator - Handles SQL query validation and safety checks
+ */
+export class QueryValidator {
+  /**
+   * Validate SQL query (basic validation)
+   */
+  public validateQuery(query: string): { valid: boolean; error?: string } {
+    // Remove comments and whitespace
+    const cleanQuery = query
+      .replace(/--.*$/gm, '') // Remove single-line comments
+      .replace(/\/\*[\s\S]*?\*\//g, '') // Remove multi-line comments
+      .trim();
+
+    if (!cleanQuery) {
+      return { valid: false, error: 'Query is empty' };
+    }
+
+    // Block only system-level operations that should never be allowed
+    // Note: Table-level operations (DROP TABLE, TRUNCATE, DELETE, ALTER) are allowed
+    // but will require password verification in the controller
+    const absolutelyBlockedPatterns = [
+      /^\s*DROP\s+DATABASE/i,
+      /^\s*DROP\s+SCHEMA/i,
+      /^\s*CREATE\s+DATABASE/i,
+      /^\s*CREATE\s+SCHEMA/i,
+      /^\s*GRANT/i,
+      /^\s*REVOKE/i,
+      /^\s*ALTER\s+ROLE/i,
+      /^\s*ALTER\s+USER/i,
+      /^\s*CREATE\s+ROLE/i,
+      /^\s*CREATE\s+USER/i,
+      /^\s*DROP\s+ROLE/i,
+      /^\s*DROP\s+USER/i,
+    ];
+
+    for (const pattern of absolutelyBlockedPatterns) {
+      if (pattern.test(cleanQuery)) {
+        return {
+          valid: false,
+          error: 'This operation is not allowed for safety reasons',
+        };
+      }
+    }
+
+    return { valid: true };
+  }
+
+  /**
+   * Check if query requires password verification
+   * Returns the operation type if verification is required, null otherwise
+   */
+  public requiresPasswordVerification(query: string): string | null {
+    // Remove comments and whitespace
+    const cleanQuery = query
+      .replace(/--.*$/gm, '')
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .trim()
+      .toUpperCase();
+
+    // Split by semicolons to check all statements
+    const statements = cleanQuery.split(';').map(s => s.trim()).filter(s => s);
+
+    const dangerousOperations: string[] = [];
+
+    for (const statement of statements) {
+      // Check for DROP operations (excluding DROP INDEX which is sometimes needed)
+      if (/^\s*DROP\s+/i.test(statement)) {
+        // Allow DROP INDEX without password
+        if (!/^\s*DROP\s+INDEX/i.test(statement)) {
+          dangerousOperations.push('DROP');
+        }
+      }
+
+      // Check for TRUNCATE
+      if (/^\s*TRUNCATE\s+/i.test(statement)) {
+        dangerousOperations.push('TRUNCATE');
+      }
+
+      // Check for DELETE without WHERE clause
+      if (/^\s*DELETE\s+FROM/i.test(statement) && !/WHERE/i.test(statement)) {
+        dangerousOperations.push('DELETE without WHERE');
+      }
+
+      // Check for ALTER operations (excluding ALTER ADD which is safe)
+      if (/^\s*ALTER\s+/i.test(statement)) {
+        // ALTER ADD is considered safe (adding columns, indexes, constraints)
+        // ALTER DROP is dangerous (dropping columns, constraints)
+        if (/\s+DROP\s+/i.test(statement)) {
+          dangerousOperations.push('ALTER DROP');
+        }
+      }
+    }
+
+    if (dangerousOperations.length > 0) {
+      return dangerousOperations.join(', ');
+    }
+
+    return null;
+  }
+
+  /**
+   * Validate pgSchema name to prevent SQL injection
+   * Only allows alphanumeric characters, underscores, and hyphens
+   */
+  public validateSchemaName(pgSchema: string): { valid: boolean; error?: string } {
+    // Only allow alphanumeric characters, underscores, and hyphens
+    if (!/^[a-zA-Z0-9_-]+$/.test(pgSchema)) {
+      return {
+        valid: false,
+        error: `Invalid schema name: ${pgSchema}. Schema names can only contain letters, numbers, underscores, and hyphens.`,
+      };
+    }
+    return { valid: true };
+  }
+
+  /**
+   * Check if a statement is a transaction control statement
+   */
+  public isTransactionStatement(statement: string): boolean {
+    const upper = statement.trim().toUpperCase();
+    return (
+      upper.startsWith('BEGIN') ||
+      upper.startsWith('START TRANSACTION') ||
+      upper.startsWith('COMMIT') ||
+      upper.startsWith('ROLLBACK') ||
+      upper.startsWith('SAVEPOINT') ||
+      upper.startsWith('RELEASE') ||
+      upper.startsWith('ABORT')
+    );
+  }
+
+  /**
+   * Split query into individual statements
+   */
+  public splitStatements(query: string): string[] {
+    // Remove comments first
+    const cleanQuery = query
+      .replace(/--.*$/gm, '')
+      .replace(/\/\*[\s\S]*?\*\//g, '');
+
+    // Split by semicolons, but handle BEGIN/END blocks carefully
+    const statements: string[] = [];
+    let currentStatement = '';
+    let inBlock = false;
+
+    const lines = cleanQuery.split('\n');
+    
+    for (const line of lines) {
+      const trimmedLine = line.trim();
+      
+      // Skip empty lines
+      if (!trimmedLine) continue;
+
+      // Check for block start (PL/pgSQL blocks, DO statements, etc.)
+      if (/^\s*(BEGIN|DO\s+\$)/i.test(trimmedLine)) {
+        inBlock = true;
+      }
+
+      // Check for block end
+      if (inBlock && /^\s*(END|EXCEPTION)/i.test(trimmedLine)) {
+        inBlock = false;
+      }
+
+      currentStatement += line + '\n';
+
+      // Only split on semicolon if we're not inside a block
+      if (!inBlock && trimmedLine.endsWith(';')) {
+        const trimmed = currentStatement.trim();
+        if (trimmed) {
+          statements.push(trimmed);
+        }
+        currentStatement = '';
+      }
+    }
+
+    // Handle last statement without semicolon
+    const trimmed = currentStatement.trim();
+    if (trimmed) {
+      statements.push(trimmed);
+    }
+
+    // If no statements found, treat entire query as one statement
+    if (statements.length === 0 && cleanQuery.trim()) {
+      statements.push(cleanQuery.trim());
+    }
+
+    return statements;
+  }
+}
+
+export default new QueryValidator();

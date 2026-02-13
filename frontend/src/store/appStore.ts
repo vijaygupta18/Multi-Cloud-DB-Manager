@@ -2,6 +2,25 @@ import { create } from 'zustand';
 import type { User, QueryExecution } from '../types';
 import type { editor } from 'monaco-editor';
 
+// Load persisted settings from localStorage
+const loadPersistedSetting = (key: string, defaultValue: boolean): boolean => {
+  try {
+    const stored = localStorage.getItem(key);
+    return stored !== null ? stored === 'true' : defaultValue;
+  } catch {
+    return defaultValue;
+  }
+};
+
+// Save setting to localStorage
+const savePersistedSetting = (key: string, value: boolean) => {
+  try {
+    localStorage.setItem(key, String(value));
+  } catch {
+    // Ignore storage errors
+  }
+};
+
 interface AppState {
   // User state
   user: User | null;
@@ -28,6 +47,10 @@ interface AppState {
   // Execution state
   isExecuting: boolean;
   setIsExecuting: (isExecuting: boolean) => void;
+  currentExecutionId: string | null;
+  setCurrentExecutionId: (id: string | null) => void;
+  continueOnError: boolean;
+  setContinueOnError: (value: boolean) => void;
 
   // History
   queryHistory: QueryExecution[];
@@ -84,6 +107,13 @@ export const useAppStore = create<AppState>((set, get) => ({
   // Execution
   isExecuting: false,
   setIsExecuting: (isExecuting) => set({ isExecuting }),
+  currentExecutionId: null,
+  setCurrentExecutionId: (id) => set({ currentExecutionId: id }),
+  continueOnError: loadPersistedSetting('continueOnError', false),
+  setContinueOnError: (value) => {
+    savePersistedSetting('continueOnError', value);
+    set({ continueOnError: value });
+  },
 
   // History
   queryHistory: [],

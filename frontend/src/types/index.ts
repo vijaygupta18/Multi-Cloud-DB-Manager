@@ -1,5 +1,5 @@
 export interface User {
-  id: number;
+  id: string; // Aligned with backend (UUID)
   username: string;
   email: string;
   name: string;
@@ -14,6 +14,7 @@ export interface QueryRequest {
   timeout?: number;
   pgSchema?: string;
   password?: string; // Password for sensitive operations (ALTER/DROP)
+  continueOnError?: boolean; // Continue executing remaining statements if one fails
 }
 
 export interface QueryResult {
@@ -48,7 +49,7 @@ export interface QueryResponse {
 
 export interface QueryExecution {
   id: string;
-  user_id: number;
+  user_id: string; // Aligned with backend (UUID)
   query: string;
   database_name: string; // Database name (e.g., 'bpp', 'bap')
   execution_mode: string; // 'both' or specific cloud name

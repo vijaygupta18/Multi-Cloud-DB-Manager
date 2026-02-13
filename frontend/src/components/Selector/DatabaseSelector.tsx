@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import {
   Box,
   FormControl,
@@ -10,8 +10,15 @@ import {
   Stack,
   Chip,
   CircularProgress,
+  Typography,
+  LinearProgress,
+  Checkbox,
+  FormControlLabel,
+  Tooltip,
 } from '@mui/material';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
+import StopIcon from '@mui/icons-material/Stop';
+import InfoIcon from '@mui/icons-material/Info';
 import { useAppStore } from '../../store/appStore';
 import { queryAPI, schemaAPI } from '../../services/api';
 import toast from 'react-hot-toast';
@@ -31,6 +38,8 @@ interface DatabaseOption {
   defaultSchema: string;
 }
 
+const POLL_INTERVAL = 1500; // 1.5 seconds
+
 const DatabaseSelector = ({ onExecute }: DatabaseSelectorProps) => {
   const {
     selectedDatabase,
@@ -43,6 +52,10 @@ const DatabaseSelector = ({ onExecute }: DatabaseSelectorProps) => {
     getQueryToExecute,
     isExecuting,
     setIsExecuting,
+    currentExecutionId,
+    setCurrentExecutionId,
+    continueOnError,
+    setContinueOnError,
     user,
   } = useAppStore();
 
@@ -54,6 +67,19 @@ const DatabaseSelector = ({ onExecute }: DatabaseSelectorProps) => {
   const [verificationPassword, setVerificationPassword] = useState('');
   const [executionModes, setExecutionModes] = useState<Array<{ value: string; label: string; cloudName: string }>>([]);
   const [cloudNames, setCloudNames] = useState<{ primary: string; secondary: string[] }>({ primary: '', secondary: [] });
+  
+  // Execution state
+  const [executionProgress, setExecutionProgress] = useState<{ current: number; total: number } | null>(null);
+  const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Cleanup polling on unmount
+  useEffect(() => {
+    return () => {
+      if (pollIntervalRef.current) {
+        clearInterval(pollIntervalRef.current);
+      }
+    };
+  }, []);
 
   // Shared function to fetch configuration
   const fetchConfiguration = async (forceRefresh = false) => {
@@ -174,10 +200,67 @@ const DatabaseSelector = ({ onExecute }: DatabaseSelectorProps) => {
     }
   }, [selectedDatabase, databaseOptions, setSelectedPgSchema]);
 
+  const pollExecutionStatus = async (executionId: string) => {
+    try {
+      const status = await queryAPI.getStatus(executionId);
+      
+      // Update progress
+      if (status.progress) {
+        setExecutionProgress({
+          current: status.progress.currentStatement,
+          total: status.progress.totalStatements
+        });
+      }
+
+      // Check if execution is complete
+      if (status.status === 'completed' || status.status === 'failed' || status.status === 'cancelled') {
+        // Stop polling
+        if (pollIntervalRef.current) {
+          clearInterval(pollIntervalRef.current);
+          pollIntervalRef.current = null;
+        }
+
+        setIsExecuting(false);
+        setCurrentExecutionId(null);
+        setExecutionProgress(null);
+
+        // Show results if available (including partial results when cancelled)
+        if (status.result) {
+          onExecute(status.result);
+        }
+
+        // Show appropriate message based on status
+        if (status.status === 'completed') {
+          toast.success('Query executed successfully!');
+        } else if (status.status === 'cancelled') {
+          toast('Query was cancelled', { icon: '⚠️' });
+        } else if (status.status === 'failed') {
+          if (status.error) {
+            toast.error(status.error);
+          } else {
+            toast.error('Query execution failed');
+          }
+        }
+      }
+    } catch (error: any) {
+      console.error('Failed to poll execution status:', error);
+      // Stop polling on error
+      if (pollIntervalRef.current) {
+        clearInterval(pollIntervalRef.current);
+        pollIntervalRef.current = null;
+      }
+      setIsExecuting(false);
+      setCurrentExecutionId(null);
+      setExecutionProgress(null);
+      toast.error('Failed to get execution status');
+    }
+  };
+
   const executeQueryInternal = async (password?: string) => {
     const queryToExecute = getQueryToExecute();
 
     setIsExecuting(true);
+    setExecutionProgress(null);
 
     try {
       // Validate query first
@@ -188,28 +271,48 @@ const DatabaseSelector = ({ onExecute }: DatabaseSelectorProps) => {
         return;
       }
 
-      // Execute query
-      const result = await queryAPI.execute({
+      // Start execution (returns immediately with executionId)
+      const { executionId } = await queryAPI.execute({
         query: queryToExecute,
         database: selectedDatabase,
         mode: selectedMode,
         pgSchema: selectedPgSchema,
         password, // Include password if provided
+        continueOnError,
       });
 
-      onExecute(result);
+      setCurrentExecutionId(executionId);
 
-      if (result.success) {
-        toast.success('Query executed successfully!');
-        // Don't clear autosave - let it persist so query is restored on refresh
-      } else {
-        toast.error('Query execution failed');
+      // Clear any existing polling interval first
+      if (pollIntervalRef.current) {
+        clearInterval(pollIntervalRef.current);
+        pollIntervalRef.current = null;
       }
+
+      // Start polling for status
+      pollIntervalRef.current = setInterval(() => {
+        pollExecutionStatus(executionId);
+      }, POLL_INTERVAL);
+
+      // Initial poll
+      pollExecutionStatus(executionId);
+
     } catch (error: any) {
       toast.error(error.response?.data?.error || 'Failed to execute query');
-    } finally {
       setIsExecuting(false);
-      setVerificationPassword(''); // Clear password after execution
+      setCurrentExecutionId(null);
+      setExecutionProgress(null);
+    }
+  };
+
+  const handleCancelExecution = async () => {
+    if (!currentExecutionId) return;
+
+    try {
+      await queryAPI.cancel(currentExecutionId);
+      // Don't show toast here - wait for the actual cancellation status from polling
+    } catch (error: any) {
+      toast.error(error.response?.data?.error || 'Failed to cancel query');
     }
   };
 
@@ -241,7 +344,7 @@ const DatabaseSelector = ({ onExecute }: DatabaseSelectorProps) => {
     await executeQueryInternal(password);
   };
 
-  const handleCancelExecution = () => {
+  const handleCancelWarning = () => {
     setShowWarningDialog(false);
     setCurrentWarning(null);
     setPendingExecution(false);
@@ -253,123 +356,184 @@ const DatabaseSelector = ({ onExecute }: DatabaseSelectorProps) => {
         open={showWarningDialog}
         warning={currentWarning}
         onConfirm={handleConfirmExecution}
-        onCancel={handleCancelExecution}
+        onCancel={handleCancelWarning}
         requiresPassword={currentWarning?.requiresPassword || false}
         selectedMode={selectedMode}
         cloudNames={cloudNames}
       />
 
       <Paper elevation={2} sx={{ p: 2 }}>
-        <Stack direction="row" spacing={2} alignItems="center">
-          {/* Database Selector */}
-          <FormControl sx={{ flex: 1 }}>
-            <InputLabel>Database</InputLabel>
-            <Select
-              value={selectedDatabase}
-              label="Database"
-              onChange={(e) => setSelectedDatabase(e.target.value)}
-              disabled={isExecuting || loadingConfig}
-            >
-              {loadingConfig ? (
-                <MenuItem value="">
-                  <CircularProgress size={20} />
-                </MenuItem>
-              ) : (
-                databaseOptions.map((option) => (
-                  <MenuItem key={option.value} value={option.value}>
-                    {option.label}
+        <Stack spacing={2}>
+          <Stack direction="row" spacing={2} alignItems="center">
+            {/* Database Selector */}
+            <FormControl sx={{ flex: 1 }}>
+              <InputLabel>Database</InputLabel>
+              <Select
+                value={selectedDatabase}
+                label="Database"
+                onChange={(e) => setSelectedDatabase(e.target.value)}
+                disabled={isExecuting || loadingConfig}
+              >
+                {loadingConfig ? (
+                  <MenuItem value="">
+                    <CircularProgress size={20} />
                   </MenuItem>
-                ))
-              )}
-            </Select>
-          </FormControl>
-
-          {/* PostgreSQL Schema Selector */}
-          <FormControl sx={{ flex: 1 }}>
-            <InputLabel>PostgreSQL Schema</InputLabel>
-            <Select
-              value={selectedPgSchema}
-              label="PostgreSQL Schema"
-              onChange={(e) => setSelectedPgSchema(e.target.value)}
-              disabled={isExecuting || loadingConfig}
-            >
-              {loadingConfig ? (
-                <MenuItem value="">
-                  <CircularProgress size={20} />
-                </MenuItem>
-              ) : (
-                databaseOptions
-                  .find(opt => opt.value === selectedDatabase)
-                  ?.schemas.map((schema) => (
-                    <MenuItem key={schema} value={schema}>
-                      {schema}
+                ) : (
+                  databaseOptions.map((option) => (
+                    <MenuItem key={option.value} value={option.value}>
+                      {option.label}
                     </MenuItem>
                   ))
-              )}
-            </Select>
-          </FormControl>
+                )}
+              </Select>
+            </FormControl>
 
-          {/* Execution Mode Selector */}
-          <FormControl sx={{ flex: 1 }}>
-            <InputLabel>Execution Mode</InputLabel>
-            <Select
-              value={selectedMode}
-              label="Execution Mode"
-              onChange={(e) => setSelectedMode(e.target.value as any)}
-              disabled={isExecuting || loadingConfig}
-            >
-              {loadingConfig ? (
-                <MenuItem value="">
-                  <CircularProgress size={20} />
-                </MenuItem>
-              ) : (
-                executionModes.map((mode) => (
-                  <MenuItem key={mode.value} value={mode.value}>
-                    {mode.label}
+            {/* PostgreSQL Schema Selector */}
+            <FormControl sx={{ flex: 1 }}>
+              <InputLabel>PostgreSQL Schema</InputLabel>
+              <Select
+                value={selectedPgSchema}
+                label="PostgreSQL Schema"
+                onChange={(e) => setSelectedPgSchema(e.target.value)}
+                disabled={isExecuting || loadingConfig}
+              >
+                {loadingConfig ? (
+                  <MenuItem value="">
+                    <CircularProgress size={20} />
                   </MenuItem>
-                ))
+                ) : (
+                  databaseOptions
+                    .find(opt => opt.value === selectedDatabase)
+                    ?.schemas.map((schema) => (
+                      <MenuItem key={schema} value={schema}>
+                        {schema}
+                      </MenuItem>
+                    ))
+                )}
+              </Select>
+            </FormControl>
+
+            {/* Execution Mode Selector */}
+            <FormControl sx={{ flex: 1 }}>
+              <InputLabel>Execution Mode</InputLabel>
+              <Select
+                value={selectedMode}
+                label="Execution Mode"
+                onChange={(e) => setSelectedMode(e.target.value as any)}
+                disabled={isExecuting || loadingConfig}
+              >
+                {loadingConfig ? (
+                  <MenuItem value="">
+                    <CircularProgress size={20} />
+                  </MenuItem>
+                ) : (
+                  executionModes.map((mode) => (
+                    <MenuItem key={mode.value} value={mode.value}>
+                      {mode.label}
+                    </MenuItem>
+                  ))
+                )}
+              </Select>
+            </FormControl>
+
+            {/* Status Chips */}
+            <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', flexWrap: 'wrap' }}>
+              {selectedMode === 'both' && (
+                <>
+                  <Chip label={cloudNames.primary.toUpperCase()} color="primary" size="small" />
+                  {cloudNames.secondary.map((cloud, index) => (
+                    <Chip
+                      key={cloud}
+                      label={cloud.toUpperCase()}
+                      color={index === 0 ? 'secondary' : 'info'}
+                      size="small"
+                    />
+                  ))}
+                </>
               )}
-            </Select>
-          </FormControl>
+              {selectedMode !== 'both' && executionModes.find(m => m.value === selectedMode) && (
+                <Chip
+                  label={executionModes.find(m => m.value === selectedMode)?.label || selectedMode.toUpperCase()}
+                  color="primary"
+                  size="small"
+                />
+              )}
+            </Box>
 
-          {/* Status Chips */}
-          <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', flexWrap: 'wrap' }}>
-            {selectedMode === 'both' && (
-              <>
-                <Chip label={cloudNames.primary.toUpperCase()} color="primary" size="small" />
-                {cloudNames.secondary.map((cloud, index) => (
-                  <Chip
-                    key={cloud}
-                    label={cloud.toUpperCase()}
-                    color={index === 0 ? 'secondary' : 'info'}
-                    size="small"
-                  />
-                ))}
-              </>
+            <Box sx={{ flexGrow: 1 }} />
+
+            {/* Continue on Error Toggle */}
+            <Box sx={{ display: 'flex', alignItems: 'center' }}>
+              <Tooltip title="Run all statements even if some fail (e.g., column already exists)">
+                <FormControlLabel
+                  control={
+                    <Checkbox
+                      checked={continueOnError}
+                      onChange={(e) => setContinueOnError(e.target.checked)}
+                      disabled={isExecuting}
+                      size="small"
+                    />
+                  }
+                  label={
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                      <Typography variant="body2" color="text.secondary">
+                        Continue on error
+                      </Typography>
+                      <InfoIcon sx={{ fontSize: 16, color: 'text.secondary' }} />
+                    </Box>
+                  }
+                />
+              </Tooltip>
+            </Box>
+
+            {/* Execute/Cancel Button */}
+            {isExecuting ? (
+              <Button
+                variant="contained"
+                color="error"
+                size="large"
+                startIcon={<StopIcon />}
+                onClick={handleCancelExecution}
+                sx={{ minWidth: 150 }}
+              >
+                Cancel
+              </Button>
+            ) : (
+              <Button
+                variant="contained"
+                color="success"
+                size="large"
+                startIcon={<PlayArrowIcon />}
+                onClick={handleExecute}
+                disabled={!currentQuery.trim()}
+                sx={{ minWidth: 150 }}
+              >
+                Execute
+              </Button>
             )}
-            {selectedMode !== 'both' && executionModes.find(m => m.value === selectedMode) && (
-              <Chip
-                label={executionModes.find(m => m.value === selectedMode)?.label || selectedMode.toUpperCase()}
-                color="primary"
-                size="small"
+          </Stack>
+
+          {/* Progress Bar */}
+          {isExecuting && executionProgress && executionProgress.total > 0 && (
+            <Box sx={{ width: '100%' }}>
+              <LinearProgress 
+                variant="determinate" 
+                value={(executionProgress.current / executionProgress.total) * 100} 
               />
-            )}
-          </Box>
+              <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5 }}>
+                Executing statement {executionProgress.current} of {executionProgress.total}
+              </Typography>
+            </Box>
+          )}
 
-          <Box sx={{ flexGrow: 1 }} />
-
-          {/* Execute Button */}
-          <Button
-            variant="contained"
-            color="success"
-            size="large"
-            startIcon={<PlayArrowIcon />}
-            onClick={handleExecute}
-            disabled={isExecuting || !currentQuery.trim()}
-            sx={{ minWidth: 150 }}
-          >
-            {isExecuting ? 'Executing...' : 'Execute'}
-          </Button>
+          {isExecuting && (!executionProgress || executionProgress.total === 0) && (
+            <Box sx={{ width: '100%' }}>
+              <LinearProgress />
+              <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5 }}>
+                Executing query...
+              </Typography>
+            </Box>
+          )}
         </Stack>
       </Paper>
     </>

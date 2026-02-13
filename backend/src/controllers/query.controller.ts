@@ -8,7 +8,7 @@ import { QueryRequest } from '../types';
 import bcrypt from 'bcryptjs';
 
 /**
- * Execute a query on selected databases
+ * Start async query execution (returns immediately with executionId)
  */
 export const executeQuery = async (
   req: Request,
@@ -88,31 +88,118 @@ export const executeQuery = async (
       mode: queryRequest.mode,
     });
 
-    // Execute query
-    const result = await queryService.executeDual(queryRequest);
+    // Start async execution - returns immediately with executionId
+    const executionId = queryService.startExecution(queryRequest, user.id);
 
-    // Debug logging
-    const cloudResults = Object.keys(result).filter(k => k !== 'id' && k !== 'success');
-    logger.info('Query result structure', {
-      executionId: result.id,
-      clouds: cloudResults,
-      overallSuccess: result.success,
+    res.json({
+      executionId,
+      status: 'started',
+      message: 'Query execution started'
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Get execution status and results
+ */
+export const getExecutionStatus = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const { executionId } = req.params;
+
+    if (!executionId) {
+      throw new AppError('Execution ID is required', 400);
+    }
+
+    const status = queryService.getExecutionStatus(executionId);
+
+    if (!status) {
+      throw new AppError('Execution not found', 404);
+    }
+
+    res.json(status);
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Cancel an active query execution
+ */
+export const cancelQuery = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const { executionId } = req.params;
+
+    if (!executionId) {
+      throw new AppError('Execution ID is required', 400);
+    }
+
+    // Check if execution exists in results
+    const status = queryService.getExecutionStatus(executionId);
+    
+    if (!status) {
+      throw new AppError('Execution not found', 404);
+    }
+
+    // If already completed, return success (nothing to cancel)
+    if (status.status !== 'running') {
+      res.json({
+        success: true,
+        message: 'Execution already completed',
+        status: status.status
+      });
+      return;
+    }
+
+    // Try to cancel
+    const cancelled = await queryService.cancelExecution(executionId);
+
+    if (!cancelled) {
+      // Execution finished between our check and cancel attempt
+      res.json({
+        success: true,
+        message: 'Execution completed before cancellation'
+      });
+      return;
+    }
+
+    logger.info('Query cancellation requested', {
+      executionId,
+      user: (req.user as Express.User)?.email
     });
 
-    // Save to history (async, don't wait)
-    historyService
-      .saveQueryExecution(
-        user.id,
-        queryRequest.query,
-        queryRequest.database,
-        queryRequest.mode,
-        result
-      )
-      .catch((err) => {
-        logger.error('Failed to save query to history:', err);
-      });
+    res.json({
+      success: true,
+      message: 'Query cancellation requested'
+    });
+  } catch (error) {
+    next(error);
+  }
+};
 
-    res.json(result);
+/**
+ * Get list of active query executions
+ */
+export const getActiveExecutions = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const executions = queryService.getActiveExecutions();
+
+    res.json({
+      executions
+    });
   } catch (error) {
     next(error);
   }

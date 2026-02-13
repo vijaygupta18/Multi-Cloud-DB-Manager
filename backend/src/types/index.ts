@@ -44,6 +44,7 @@ export interface QueryRequest {
   timeout?: number;
   pgSchema?: string;
   password?: string; // Password for sensitive operations (ALTER/DROP)
+  continueOnError?: boolean; // Continue executing remaining statements if one fails
 }
 
 export interface StatementResult {

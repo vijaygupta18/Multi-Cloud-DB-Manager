@@ -83,8 +83,30 @@ export const authAPI = {
 
 // Query API
 export const queryAPI = {
-  execute: async (request: QueryRequest): Promise<QueryResponse> => {
+  execute: async (request: QueryRequest): Promise<{ executionId: string; status: string; message: string }> => {
     const response = await api.post('/api/query/execute', request);
+    return response.data;
+  },
+
+  getStatus: async (executionId: string): Promise<{
+    executionId: string;
+    status: 'running' | 'completed' | 'failed' | 'cancelled';
+    result?: QueryResponse;
+    error?: string;
+    progress?: {
+      currentStatement: number;
+      totalStatements: number;
+      currentStatementText?: string;
+    };
+    startTime: number;
+    endTime?: number;
+  }> => {
+    const response = await api.get(`/api/query/status/${executionId}`);
+    return response.data;
+  },
+
+  cancel: async (executionId: string): Promise<{ success: boolean; message: string }> => {
+    const response = await api.post(`/api/query/cancel/${executionId}`);
     return response.data;
   },
 
