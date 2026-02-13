@@ -12,11 +12,13 @@ import ExecutionManager from './ExecutionManager';
 export class QueryExecutor {
   private dbPools: DatabasePools;
   private maxTimeout: number;
+  private statementTimeout: number;
   private executionManager: ExecutionManager;
 
   constructor(executionManager: ExecutionManager) {
     this.dbPools = DatabasePools.getInstance();
     this.maxTimeout = parseInt(process.env.MAX_QUERY_TIMEOUT_MS || '300000');
+    this.statementTimeout = parseInt(process.env.STATEMENT_TIMEOUT_MS || '300000'); // 5 minutes default
     this.executionManager = executionManager;
   }
 
@@ -126,6 +128,7 @@ export class QueryExecutor {
         }
 
         // Safe to use without quotes after strict validation
+        // Note: pg identifiers can't use parameterized queries, but validation ensures safety
         await client.query(`SET search_path TO ${pgSchema}, public`);
 
         logger.info(`Executing query on ${cloudName}/${databaseName}`, {
@@ -334,7 +337,14 @@ export class QueryExecutor {
       }
 
       try {
-        const result = await client.query(statement);
+        // Add timeout for each statement to prevent indefinite hangs
+        const result = await Promise.race([
+          client.query(statement),
+          new Promise((_, reject) => 
+            setTimeout(() => reject(new Error(`Statement timeout after ${this.statementTimeout}ms`)), this.statementTimeout)
+          )
+        ]) as QueryResult;
+        
         results.push({
           statement: statement,
           success: true,

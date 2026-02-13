@@ -14,6 +14,7 @@ interface ActiveExecution {
  */
 export interface ExecutionResult {
   executionId: string;
+  userId?: string; // Track which user started this execution
   status: 'running' | 'completed' | 'failed' | 'cancelled';
   result?: QueryResponse;
   error?: string;
@@ -64,9 +65,10 @@ export class ExecutionManager {
   /**
    * Initialize a new execution
    */
-  public initializeExecution(executionId: string): void {
+  public initializeExecution(executionId: string, userId?: string): void {
     this.executionResults.set(executionId, {
       executionId,
+      userId,
       status: 'running',
       startTime: Date.now(),
       progress: {

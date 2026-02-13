@@ -104,15 +104,43 @@ export class QueryValidator {
   /**
    * Validate pgSchema name to prevent SQL injection
    * Only allows alphanumeric characters, underscores, and hyphens
+   * Must start with letter or underscore (PostgreSQL identifier rules)
    */
   public validateSchemaName(pgSchema: string): { valid: boolean; error?: string } {
-    // Only allow alphanumeric characters, underscores, and hyphens
-    if (!/^[a-zA-Z0-9_-]+$/.test(pgSchema)) {
+    // PostgreSQL identifier rules:
+    // - Must start with letter or underscore
+    // - Can contain letters, numbers, underscores
+    // - Maximum length 63 bytes
+    if (!pgSchema || typeof pgSchema !== 'string') {
       return {
         valid: false,
-        error: `Invalid schema name: ${pgSchema}. Schema names can only contain letters, numbers, underscores, and hyphens.`,
+        error: 'Schema name is required',
       };
     }
+    
+    if (pgSchema.length > 63) {
+      return {
+        valid: false,
+        error: `Schema name too long: ${pgSchema.length} characters (max 63)`,
+      };
+    }
+    
+    // Must start with letter or underscore
+    if (!/^[a-zA-Z_]/.test(pgSchema)) {
+      return {
+        valid: false,
+        error: `Invalid schema name: ${pgSchema}. Schema names must start with a letter or underscore.`,
+      };
+    }
+    
+    // Only allow alphanumeric and underscores (no hyphens in SQL identifiers without quotes)
+    if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(pgSchema)) {
+      return {
+        valid: false,
+        error: `Invalid schema name: ${pgSchema}. Schema names can only contain letters, numbers, and underscores.`,
+      };
+    }
+    
     return { valid: true };
   }
 

@@ -138,6 +138,7 @@ export const cancelQuery = async (
 ) => {
   try {
     const { executionId } = req.params;
+    const user = req.user as Express.User;
 
     if (!executionId) {
       throw new AppError('Execution ID is required', 400);
@@ -148,6 +149,11 @@ export const cancelQuery = async (
     
     if (!status) {
       throw new AppError('Execution not found', 404);
+    }
+
+    // Authorization: Only allow cancelling own executions or MASTER users
+    if (status.userId && status.userId !== user.id && user.role !== 'MASTER') {
+      throw new AppError('You can only cancel your own queries', 403);
     }
 
     // If already completed, return success (nothing to cancel)
@@ -174,7 +180,7 @@ export const cancelQuery = async (
 
     logger.info('Query cancellation requested', {
       executionId,
-      user: (req.user as Express.User)?.email
+      user: user.email
     });
 
     res.json({

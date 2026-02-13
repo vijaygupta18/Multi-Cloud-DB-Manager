@@ -106,8 +106,8 @@ class QueryService {
     const { v4: uuidv4 } = require('uuid');
     const executionId = uuidv4();
     
-    // Initialize result storage
-    this.executionManager.initializeExecution(executionId);
+    // Initialize result storage with userId for authorization
+    this.executionManager.initializeExecution(executionId, userId);
     
     // Start execution in background with proper error handling
     this.executeAsync(executionId, request, userId).catch((error) => {
@@ -124,6 +124,7 @@ class QueryService {
       executionId,
       database: request.database,
       mode: request.mode,
+      userId,
     });
     
     return executionId;
