@@ -159,10 +159,20 @@ class QueryService {
 
       // Execute on each cloud
       const successes: boolean[] = [];
+      let wasCancelled = false;
+      
       for (const cloudName of cloudsToExecute) {
-        // Check if cancelled
+        // Check if cancelled before starting this cloud
         if (this.executionManager.isCancelled(executionId)) {
-          break;
+          wasCancelled = true;
+          // Add a placeholder result for clouds that weren't executed due to cancellation
+          response[cloudName] = {
+            success: false,
+            error: 'Query was cancelled before execution on this cloud',
+            duration_ms: 0
+          };
+          successes.push(false);
+          continue; // Continue to add placeholders for remaining clouds
         }
         
         try {
@@ -177,6 +187,10 @@ class QueryService {
           );
           response[cloudName] = result;
           successes.push(result.success);
+          
+          // Save partial results immediately after each cloud completes
+          // This ensures partial results are available even if cancelled mid-execution
+          this.executionManager.completeExecution(executionId, {...response}, false);
           
           // Update progress
           if (result.statementCount) {
@@ -207,14 +221,14 @@ class QueryService {
       // Determine overall success
       response.success = successes.length > 0 && successes.every(s => s);
       
-      // Update result (respects cancellation status)
+      // Update result (respects cancellation status, saves partial results)
       this.executionManager.completeExecution(executionId, response, response.success);
 
       logger.info('Async query execution complete', {
         executionId,
         success: response.success,
         cloudsExecuted: cloudsToExecute,
-        wasCancelled: this.executionManager.isCancelled(executionId),
+        wasCancelled,
       });
       
       // Save to history if userId provided (including cancelled queries)
