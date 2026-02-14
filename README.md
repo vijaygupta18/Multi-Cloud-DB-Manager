@@ -16,12 +16,18 @@ A powerful web-based PostgreSQL database management tool that enables seamless q
 - **Environment Variable Support**: Secure credential management with `${VAR_NAME}` substitution
 - **Runtime Configuration**: Changes reflected immediately without redeployment
 
-### Query Management
-- **Monaco SQL Editor**: Professional code editor with syntax highlighting
-- **Multi-Statement Support**: Execute multiple SQL statements with automatic transaction handling
-- **Query Validation**: Real-time syntax checking before execution
-- **SQL Formatting**: One-click SQL formatting with PostgreSQL dialect support
-- **Auto-Save**: Automatic draft saving every 5 seconds
+### Async Query Execution
+- **Non-Blocking Queries**: Start execution and get results via polling
+- **Query Cancellation**: Cancel long-running queries anytime
+- **Progress Tracking**: See "Statement X of Y" progress for multi-statement queries
+- **Continue on Error**: Option to execute all statements even if some fail
+- **Partial Results**: View results from completed statements before cancellation
+
+### Multi-Statement Support
+- **Sequential Execution**: Execute multiple statements separated by semicolons
+- **Individual Results**: Each statement shows success/error independently
+- **Transaction Handling**: Automatic BEGIN/COMMIT/ROLLBACK support
+- **Error Recovery**: Continue or stop on first error (configurable)
 
 ### User Management
 - **Role-Based Access Control**:
@@ -77,15 +83,20 @@ A powerful web-based PostgreSQL database management tool that enables seamless q
 │   Backend       │
 │ (Express + TS)  │
 │   Port: 3000    │
-└────────┬────────┘
-         │
-    ┌────┴─────┬──────────┬──────────┐
-    │          │          │          │
-┌───▼────┐ ┌──▼─────┐ ┌──▼─────┐ ┌──▼─────┐
-│ Cloud1 │ │ Cloud2 │ │ Cloud3 │ │  ...   │
-│  DBs   │ │  DBs   │ │  DBs   │ │  DBs   │
-└────────┘ └────────┘ └────────┘ └────────┘
+└────┬────────────┘
+     │
+     ├──────────────┬──────────────┐
+     │              │              │
+┌────▼────┐   ┌────▼────┐   ┌────▼────┐
+│  Redis  │   │ Cloud1  │   │ Cloud2  │
+│(Executions) │  DBs    │   │  DBs    │
+└─────────┘   └─────────┘   └─────────┘
 ```
+
+**Redis Usage:**
+- **Session Storage**: User sessions shared across all backend instances
+- **Execution State**: Query execution status and results shared across pods
+- **Fallback**: In-memory storage if Redis is unavailable
 
 ## 🚀 Quick Start
 
@@ -184,6 +195,8 @@ FRONTEND_URL=http://localhost:5173
 
 # Query Settings
 MAX_QUERY_TIMEOUT_MS=300000
+STATEMENT_TIMEOUT_MS=300000
+REDIS_EXECUTION_TTL_SECONDS=300
 
 # Migrations
 RUN_MIGRATIONS=true
@@ -191,6 +204,14 @@ RUN_MIGRATIONS=true
 # Environment variables for databases.json
 DB_PASSWORD=your-secure-password
 ```
+
+**Environment Variables Explained:**
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `MAX_QUERY_TIMEOUT_MS` | 300000 | Overall query timeout (5 minutes) |
+| `STATEMENT_TIMEOUT_MS` | 300000 | Per-statement timeout (5 minutes) |
+| `REDIS_EXECUTION_TTL_SECONDS` | 300 | Execution state TTL in Redis (5 minutes) |
 
 Create `frontend/.env`:
 
@@ -379,6 +400,8 @@ GET    /api/auth/users          - List all users (MASTER only)
 ```
 POST   /api/query/execute       - Execute query
 POST   /api/query/validate      - Validate query syntax
+GET    /api/query/status/:id    - Get execution status
+POST   /api/query/cancel/:id    - Cancel running query
 ```
 
 ### Configuration
