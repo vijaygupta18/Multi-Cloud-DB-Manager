@@ -6,6 +6,20 @@ import { QueryRequest, QueryResponse } from '../../types';
 import QueryValidator from './QueryValidator';
 import ExecutionManager from './ExecutionManager';
 
+// Clean field info - only keep essential properties
+interface CleanField {
+  name: string;
+  dataTypeID?: number;
+}
+
+// Clean result without internal PostgreSQL metadata
+interface CleanQueryResult {
+  command: string;
+  rowCount: number | null;
+  rows: any[];
+  fields: CleanField[];
+}
+
 /**
  * QueryExecutor - Handles actual query execution on databases
  */
@@ -20,6 +34,21 @@ export class QueryExecutor {
     this.maxTimeout = parseInt(process.env.MAX_QUERY_TIMEOUT_MS || '300000');
     this.statementTimeout = parseInt(process.env.STATEMENT_TIMEOUT_MS || '300000'); // 5 minutes default
     this.executionManager = executionManager;
+  }
+
+  /**
+   * Clean PostgreSQL result - remove internal metadata, keep only essential fields
+   */
+  private cleanResult(result: QueryResult): CleanQueryResult {
+    return {
+      command: result.command,
+      rowCount: result.rowCount,
+      rows: result.rows,
+      fields: result.fields.map(f => ({
+        name: f.name,
+        dataTypeID: f.dataTypeID
+      }))
+    };
   }
 
   /**
@@ -73,11 +102,11 @@ export class QueryExecutor {
     executionId?: string
   ): Promise<{
     success: boolean;
-    result?: QueryResult;
+    result?: CleanQueryResult;
     results?: Array<{
       statement: string;
       success: boolean;
-      result?: QueryResult;
+      result?: CleanQueryResult;
       error?: string;
       rowsAffected?: number;
     }>;
@@ -154,7 +183,7 @@ export class QueryExecutor {
 
               return {
                 success: true,
-                result,
+                result: this.cleanResult(result),
                 duration_ms: duration,
               };
             } catch (error: any) {
@@ -208,7 +237,7 @@ export class QueryExecutor {
 
           return {
             success: true,
-            result,
+            result: this.cleanResult(result),
             duration_ms: duration,
           };
         } catch (error: any) {
@@ -301,7 +330,7 @@ export class QueryExecutor {
     results: Array<{
       statement: string;
       success: boolean;
-      result?: QueryResult;
+      result?: CleanQueryResult;
       error?: string;
       rowsAffected?: number;
     }>;
@@ -348,7 +377,7 @@ export class QueryExecutor {
         results.push({
           statement: statement,
           success: true,
-          result,
+          result: this.cleanResult(result),
           rowsAffected: result.rowCount || 0,
         });
       } catch (error: any) {
