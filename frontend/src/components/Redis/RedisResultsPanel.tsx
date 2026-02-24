@@ -1,14 +1,8 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, memo } from 'react';
 import {
   Box,
   Paper,
   Typography,
-  Table,
-  TableBody,
-  TableCell,
-  TableContainer,
-  TableHead,
-  TableRow,
   Alert,
   Chip,
   Stack,
@@ -21,7 +15,12 @@ import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import ErrorIcon from '@mui/icons-material/Error';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import ExpandLessIcon from '@mui/icons-material/ExpandLess';
+import VirtualizedTable from '../VirtualizedTable';
+import { copyToClipboard } from '../../utils/clipboard';
 import type { RedisCommandResponse, RedisCloudResult } from '../../types';
+
+const GLOW_SUCCESS = '0 0 12px rgba(52, 211, 153, 0.4)';
+const GLOW_ERROR = '0 0 12px rgba(248, 113, 113, 0.4)';
 
 interface RedisResultsPanelProps {
   result: RedisCommandResponse | null;
@@ -57,15 +56,19 @@ const RedisResultsPanel = ({ result }: RedisResultsPanelProps) => {
     );
   }
 
-  const renderFormattedData = (data: any, command: string) => {
+  const renderFormattedData = (data: any, _command: string) => {
     if (data === null || data === undefined) {
       return <Alert severity="info">Key not found (nil)</Alert>;
     }
 
-    // Scalar values (GET, TTL, TYPE, EXISTS)
+    // Scalar values
     if (typeof data === 'string' || typeof data === 'number' || typeof data === 'boolean') {
       return (
-        <Paper variant="outlined" sx={{ p: 2, bgcolor: '#1e1e1e', color: '#d4d4d4' }}>
+        <Paper
+          variant="outlined"
+          onClick={() => copyToClipboard(data)}
+          sx={{ p: 2, bgcolor: 'background.default', color: 'text.primary', cursor: 'pointer', '&:hover': { bgcolor: 'rgba(255,255,255,0.06)' } }}
+        >
           <pre style={{ margin: 0, fontSize: '0.875rem', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
             {String(data)}
           </pre>
@@ -73,16 +76,16 @@ const RedisResultsPanel = ({ result }: RedisResultsPanelProps) => {
       );
     }
 
-    // Array values (MGET, LRANGE, SMEMBERS, ZRANGE, HKEYS)
+    // Array values
     if (Array.isArray(data)) {
       if (data.length === 0) {
         return <Alert severity="info">Empty result (no elements)</Alert>;
       }
 
-      // Stream results (XREAD, XREADGROUP) - array of objects
+      // Stream/object results
       if (data[0] && typeof data[0] === 'object' && !Array.isArray(data[0])) {
         return (
-          <Paper variant="outlined" sx={{ p: 2, bgcolor: '#1e1e1e', color: '#d4d4d4', maxHeight: 400, overflow: 'auto' }}>
+          <Paper variant="outlined" sx={{ p: 2, bgcolor: 'background.default', color: 'text.primary', maxHeight: 400, overflow: 'auto' }}>
             <pre style={{ margin: 0, fontSize: '0.875rem' }}>
               {JSON.stringify(data, null, 2)}
             </pre>
@@ -90,65 +93,47 @@ const RedisResultsPanel = ({ result }: RedisResultsPanelProps) => {
         );
       }
 
-      // Simple list
+      // Simple list — virtualized
+      const rows = data.map((item, i) => ({ _index: i, value: item }));
       return (
-        <TableContainer sx={{ maxHeight: 400 }}>
-          <Table size="small" stickyHeader>
-            <TableHead>
-              <TableRow>
-                <TableCell sx={{ fontWeight: 'bold', width: 60 }}>#</TableCell>
-                <TableCell sx={{ fontWeight: 'bold' }}>Value</TableCell>
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {data.map((item, i) => (
-                <TableRow key={i} hover>
-                  <TableCell>{i}</TableCell>
-                  <TableCell>
-                    {item === null
-                      ? <em style={{ color: 'gray' }}>nil</em>
-                      : typeof item === 'object'
-                      ? JSON.stringify(item)
-                      : String(item)}
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </TableContainer>
+        <VirtualizedTable
+          rows={rows}
+          columns={[
+            { key: '_index', label: '#', width: 60 },
+            { key: 'value', label: 'Value' },
+          ]}
+          height={400}
+          renderCell={(value, column) => {
+            if (column === '_index') return String(value);
+            if (value === null) return <em style={{ color: '#6b7280' }}>nil</em>;
+            if (typeof value === 'object') return JSON.stringify(value);
+            return String(value);
+          }}
+        />
       );
     }
 
-    // Hash/Object values (HGETALL)
+    // Hash/Object values
     if (typeof data === 'object') {
       const entries = Object.entries(data);
       if (entries.length === 0) {
         return <Alert severity="info">Empty hash (no fields)</Alert>;
       }
 
+      const rows = entries.map(([field, value]) => ({ field, value }));
       return (
-        <TableContainer sx={{ maxHeight: 400 }}>
-          <Table size="small" stickyHeader>
-            <TableHead>
-              <TableRow>
-                <TableCell sx={{ fontWeight: 'bold' }}>Field</TableCell>
-                <TableCell sx={{ fontWeight: 'bold' }}>Value</TableCell>
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {entries.map(([field, value]) => (
-                <TableRow key={field} hover>
-                  <TableCell sx={{ fontFamily: 'monospace' }}>{field}</TableCell>
-                  <TableCell>
-                    {typeof value === 'object'
-                      ? JSON.stringify(value)
-                      : String(value ?? 'nil')}
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </TableContainer>
+        <VirtualizedTable
+          rows={rows}
+          columns={[
+            { key: 'field', label: 'Field' },
+            { key: 'value', label: 'Value' },
+          ]}
+          height={400}
+          renderCell={(value, column) => {
+            if (typeof value === 'object' && value !== null) return JSON.stringify(value);
+            return String(value ?? 'nil');
+          }}
+        />
       );
     }
 
@@ -171,7 +156,7 @@ const RedisResultsPanel = ({ result }: RedisResultsPanelProps) => {
     return (
       <Box>
         <Stack direction="row" spacing={2} alignItems="center" sx={{ mb: 2 }}>
-          <Chip icon={<CheckCircleIcon />} label="Success" color="success" size="medium" />
+          <Chip icon={<CheckCircleIcon />} label="Success" color="success" size="medium" sx={{ boxShadow: GLOW_SUCCESS }} />
           <Chip
             label={`${data.duration_ms}ms`}
             color="default"
@@ -189,10 +174,7 @@ const RedisResultsPanel = ({ result }: RedisResultsPanelProps) => {
         {tab === 'formatted' && renderFormattedData(data.data, result!.command)}
 
         {tab === 'json' && (
-          <Paper
-            variant="outlined"
-            sx={{ p: 2, bgcolor: '#1e1e1e', color: '#d4d4d4', maxHeight: 400, overflow: 'auto' }}
-          >
+          <Paper variant="outlined" sx={{ p: 2, bgcolor: 'background.default', color: 'text.primary', maxHeight: 400, overflow: 'auto' }}>
             <pre style={{ margin: 0, fontSize: '0.875rem' }}>
               {JSON.stringify(data.data, null, 2)}
             </pre>
@@ -244,4 +226,4 @@ const RedisResultsPanel = ({ result }: RedisResultsPanelProps) => {
   );
 };
 
-export default RedisResultsPanel;
+export default memo(RedisResultsPanel);

@@ -83,6 +83,14 @@ interface AppState {
   // UI state
   showHistory: boolean;
   setShowHistory: (show: boolean) => void;
+
+  // Editor height (persisted)
+  editorHeight: number;
+  setEditorHeight: (h: number) => void;
+
+  // Ref slots for keyboard shortcut bridge
+  executeRef: { current: (() => void) | null };
+  cancelRef: { current: (() => void) | null };
 }
 
 export const useAppStore = create<AppState>((set, get) => ({
@@ -156,4 +164,15 @@ export const useAppStore = create<AppState>((set, get) => ({
   // UI
   showHistory: false,
   setShowHistory: (show) => set({ showHistory: show }),
+
+  // Editor height
+  editorHeight: Number(loadPersistedStringSetting('editorHeight', '400')),
+  setEditorHeight: (h) => {
+    savePersistedStringSetting('editorHeight', String(h));
+    set({ editorHeight: h });
+  },
+
+  // Ref slots
+  executeRef: { current: null },
+  cancelRef: { current: null },
 }));

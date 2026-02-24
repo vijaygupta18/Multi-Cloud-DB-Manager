@@ -8,12 +8,6 @@ import {
   Typography,
   LinearProgress,
   Alert,
-  Table,
-  TableBody,
-  TableCell,
-  TableContainer,
-  TableHead,
-  TableRow,
   FormControl,
   InputLabel,
   Select,
@@ -26,6 +20,7 @@ import StopIcon from '@mui/icons-material/Stop';
 import { useAppStore } from '../../store/appStore';
 import { redisAPI, schemaAPI } from '../../services/api';
 import toast from 'react-hot-toast';
+import VirtualizedTable from '../VirtualizedTable';
 import type { RedisScanResponse, RedisScanProgress, DatabaseConfiguration } from '../../types';
 
 const POLL_INTERVAL = 1000;
@@ -208,7 +203,23 @@ const RedisCacheClearer = () => {
           <Typography variant="subtitle2" sx={{ fontWeight: 'bold' }}>
             {cloudName.toUpperCase()}
           </Typography>
-          <Chip label={progress.status} color={statusColor(progress.status)} size="small" />
+          <Chip
+            label={progress.status}
+            color={statusColor(progress.status)}
+            size="small"
+            sx={{
+              ...(progress.status === 'scanning' && {
+                boxShadow: '0 0 12px rgba(108, 142, 239, 0.5)',
+                animation: 'pulse 1.5s ease-in-out infinite',
+                '@keyframes pulse': {
+                  '0%, 100%': { boxShadow: '0 0 8px rgba(108, 142, 239, 0.3)' },
+                  '50%': { boxShadow: '0 0 16px rgba(108, 142, 239, 0.6)' },
+                },
+              }),
+              ...(progress.status === 'completed' && { boxShadow: '0 0 12px rgba(52, 211, 153, 0.4)' }),
+              ...(progress.status === 'error' && { boxShadow: '0 0 12px rgba(248, 113, 113, 0.4)' }),
+            }}
+          />
         </Stack>
         <LinearProgress
           variant="determinate"
@@ -343,28 +354,20 @@ const RedisCacheClearer = () => {
               {allPreviewKeys.length >= 10000 ? '(capped at 10,000)' : ''}
               {!isDone && '...'}
             </Typography>
-            <TableContainer sx={{ maxHeight: 300 }}>
-              <Table size="small" stickyHeader>
-                <TableHead>
-                  <TableRow>
-                    <TableCell sx={{ fontWeight: 'bold' }}>Cloud</TableCell>
-                    <TableCell sx={{ fontWeight: 'bold' }}>Key</TableCell>
-                  </TableRow>
-                </TableHead>
-                <TableBody>
-                  {allPreviewKeys.map((item, i) => (
-                    <TableRow key={i} hover>
-                      <TableCell>
-                        <Chip label={item.cloud.toUpperCase()} size="small" />
-                      </TableCell>
-                      <TableCell sx={{ fontFamily: 'monospace', fontSize: '0.8rem' }}>
-                        {item.key}
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </TableContainer>
+            <VirtualizedTable
+              rows={allPreviewKeys}
+              columns={[
+                { key: 'cloud', label: 'Cloud', width: 100 },
+                { key: 'key', label: 'Key' },
+              ]}
+              height={340}
+              renderCell={(value, column) => {
+                if (column === 'cloud') {
+                  return <Chip label={String(value).toUpperCase()} size="small" />;
+                }
+                return String(value);
+              }}
+            />
           </Box>
         )}
 

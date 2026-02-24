@@ -16,5 +16,15 @@ export default defineConfig({
   build: {
     outDir: 'dist',
     sourcemap: true,
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          'vendor-react': ['react', 'react-dom', 'react-router-dom'],
+          'vendor-mui': ['@mui/material', '@mui/icons-material', '@emotion/react', '@emotion/styled'],
+          'vendor-monaco': ['@monaco-editor/react'],
+          'vendor-utils': ['axios', 'date-fns', 'file-saver', 'sql-formatter', 'zustand', 'framer-motion'],
+        },
+      },
+    },
   },
 });

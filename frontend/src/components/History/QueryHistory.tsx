@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef, useMemo, useCallback } from 'react';
+import { useEffect, useState, useRef, useMemo, useCallback, memo } from 'react';
 import {
   Box,
   Paper,
@@ -16,6 +16,7 @@ import {
   Alert,
   Button,
   Autocomplete,
+  Skeleton,
 } from '@mui/material';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
@@ -279,8 +280,13 @@ const QueryHistory = () => {
       {/* List */}
       <Box sx={{ flexGrow: 1, overflow: 'auto' }}>
         {loading ? (
-          <Box sx={{ p: 2, textAlign: 'center' }}>
-            <Typography color="text.secondary">Loading...</Typography>
+          <Box sx={{ p: 2 }}>
+            {[...Array(6)].map((_, i) => (
+              <Box key={i} sx={{ mb: 2 }}>
+                <Skeleton variant="text" width="70%" height={20} />
+                <Skeleton variant="text" width="40%" height={16} sx={{ mt: 0.5 }} />
+              </Box>
+            ))}
           </Box>
         ) : queryHistory.length === 0 ? (
           <Box sx={{ p: 2 }}>
@@ -410,4 +416,4 @@ const QueryHistory = () => {
   );
 };
 
-export default QueryHistory;
+export default memo(QueryHistory);

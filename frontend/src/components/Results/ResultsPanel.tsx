@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, memo } from 'react';
 import {
   Box,
   Paper,
@@ -24,18 +24,22 @@ import ErrorIcon from '@mui/icons-material/Error';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import ExpandLessIcon from '@mui/icons-material/ExpandLess';
 import { saveAs } from 'file-saver';
+import VirtualizedTable from '../VirtualizedTable';
+import { copyToClipboard } from '../../utils/clipboard';
 import type { QueryResponse, CloudResult } from '../../types';
 
 interface ResultsPanelProps {
   result: QueryResponse | null;
 }
 
+const GLOW_SUCCESS = '0 0 12px rgba(52, 211, 153, 0.4)';
+const GLOW_ERROR = '0 0 12px rgba(248, 113, 113, 0.4)';
+
 const ResultsPanel = ({ result }: ResultsPanelProps) => {
   const [cloudTabs, setCloudTabs] = useState<Record<string, 'table' | 'json'>>({});
   const [collapsedStatements, setCollapsedStatements] = useState<Set<string>>(new Set());
   const [expandedClouds, setExpandedClouds] = useState<Record<string, boolean>>({});
 
-  // Extract cloud results from QueryResponse (exclude 'id' and 'success' keys)
   const cloudResults = useMemo(() => {
     if (!result) return [];
     return Object.entries(result)
@@ -43,20 +47,15 @@ const ResultsPanel = ({ result }: ResultsPanelProps) => {
       .map(([cloudName, data]) => ({ cloudName, data: data as CloudResult }));
   }, [result]);
 
-  // Get tab for a specific cloud
   const getCloudTab = (cloudName: string) => cloudTabs[cloudName] || 'table';
-
-  // Set tab for a specific cloud
   const setCloudTab = (cloudName: string, tab: 'table' | 'json') => {
     setCloudTabs(prev => ({ ...prev, [cloudName]: tab }));
   };
 
-  // Get expansion state for a cloud
   const isCloudExpanded = (cloudName: string) => {
     return expandedClouds[cloudName] !== undefined ? expandedClouds[cloudName] : true;
   };
 
-  // Toggle expansion for a cloud
   const toggleCloudExpanded = (cloudName: string) => {
     setExpandedClouds(prev => ({ ...prev, [cloudName]: !isCloudExpanded(cloudName) }));
   };
@@ -64,11 +63,8 @@ const ResultsPanel = ({ result }: ResultsPanelProps) => {
   const toggleStatement = (key: string) => {
     setCollapsedStatements((prev) => {
       const newSet = new Set(prev);
-      if (newSet.has(key)) {
-        newSet.delete(key);
-      } else {
-        newSet.add(key);
-      }
+      if (newSet.has(key)) newSet.delete(key);
+      else newSet.add(key);
       return newSet;
     });
   };
@@ -85,21 +81,17 @@ const ResultsPanel = ({ result }: ResultsPanelProps) => {
 
   const exportToCSV = (data: any[], filename: string) => {
     if (!data || data.length === 0) return;
-
     const headers = Object.keys(data[0]);
     const csvContent = [
       headers.join(','),
       ...data.map((row) => headers.map((h) => JSON.stringify(row[h] ?? '')).join(',')),
     ].join('\n');
-
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8' });
     saveAs(blob, filename);
   };
 
   const exportToJSON = (data: any[], filename: string) => {
-    const blob = new Blob([JSON.stringify(data, null, 2)], {
-      type: 'application/json;charset=utf-8',
-    });
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json;charset=utf-8' });
     saveAs(blob, filename);
   };
 
@@ -117,17 +109,17 @@ const ResultsPanel = ({ result }: ResultsPanelProps) => {
       );
     }
 
-    // Check if this is a multi-statement result FIRST (before success check)
+    // Multi-statement result
     if (data.results && data.results.length > 0) {
       return (
         <Box>
-          {/* Multi-statement header */}
-          <Stack direction="row" spacing={2} alignItems="center" sx={{ mb: 2 }}>
+          <Stack direction="row" spacing={2} alignItems="center" sx={{ mb: 2, flexWrap: 'wrap' }}>
             <Chip
               icon={<CheckCircleIcon />}
               label="Multi-Statement"
               color="success"
               size="medium"
+              sx={{ boxShadow: GLOW_SUCCESS }}
             />
             <Chip
               label={`${data.statementCount} statement${data.statementCount !== 1 ? 's' : ''}`}
@@ -145,7 +137,6 @@ const ResultsPanel = ({ result }: ResultsPanelProps) => {
             />
           </Stack>
 
-          {/* Each statement result */}
           <Stack spacing={2}>
             {data.results.map((stmt, index) => {
               const stmtKey = `${cloudName}-${index}`;
@@ -154,28 +145,20 @@ const ResultsPanel = ({ result }: ResultsPanelProps) => {
               return (
                 <Paper key={index} variant="outlined" sx={{ p: 2 }}>
                   <Stack spacing={1}>
-                    {/* Statement header */}
                     <Stack direction="row" spacing={1} alignItems="center">
-                      <Typography variant="caption" sx={{ fontFamily: 'monospace', bgcolor: '#1e1e1e', color: '#d4d4d4', px: 1, py: 0.5, borderRadius: 0.5 }}>
+                      <Typography variant="caption" sx={{ fontFamily: 'monospace', bgcolor: 'background.default', color: 'text.primary', px: 1, py: 0.5, borderRadius: 0.5 }}>
                         Statement {index + 1}
                       </Typography>
                       {stmt.success ? (
-                        <Chip label="Success" color="success" size="medium" />
+                        <Chip label="Success" color="success" size="medium" sx={{ boxShadow: GLOW_SUCCESS }} />
                       ) : (
-                        <Chip label="Error" color="error" size="medium" />
+                        <Chip label="Error" color="error" size="medium" sx={{ boxShadow: GLOW_ERROR }} />
                       )}
                       {stmt.rowsAffected !== undefined && (
-                        <Chip
-                          label={`${stmt.rowsAffected} row${stmt.rowsAffected !== 1 ? 's' : ''}`}
-                          color="primary"
-                          size="medium"
-                          variant="outlined"
-                          sx={{ fontWeight: 600 }}
-                        />
+                        <Chip label={`${stmt.rowsAffected} row${stmt.rowsAffected !== 1 ? 's' : ''}`} color="primary" size="medium" variant="outlined" sx={{ fontWeight: 600 }} />
                       )}
                     </Stack>
 
-                    {/* Statement SQL - Expandable */}
                     <Box>
                       <Stack
                         direction="row"
@@ -192,17 +175,7 @@ const ResultsPanel = ({ result }: ResultsPanelProps) => {
                         </Typography>
                       </Stack>
                       <Collapse in={isExpanded}>
-                        <Paper
-                          variant="outlined"
-                          sx={{
-                            p: 1.5,
-                            mt: 1,
-                            bgcolor: '#1e1e1e',
-                            color: '#d4d4d4',
-                            maxHeight: 200,
-                            overflow: 'auto'
-                          }}
-                        >
+                        <Paper variant="outlined" sx={{ p: 1.5, mt: 1, bgcolor: 'background.default', color: 'text.primary', maxHeight: 200, overflow: 'auto' }}>
                           <pre style={{ margin: 0, fontSize: '0.75rem', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
                             {stmt.statement}
                           </pre>
@@ -210,54 +183,29 @@ const ResultsPanel = ({ result }: ResultsPanelProps) => {
                       </Collapse>
                     </Box>
 
-                  {/* Statement error */}
-                  {!stmt.success && stmt.error && (
-                    <Alert severity="error" sx={{ mt: 1 }}>
-                      {stmt.error}
-                    </Alert>
-                  )}
+                    {!stmt.success && stmt.error && (
+                      <Alert severity="error" sx={{ mt: 1 }}>{stmt.error}</Alert>
+                    )}
 
-                  {/* Statement results (if SELECT) */}
-                  {stmt.success && stmt.result && stmt.result.rows && stmt.result.rows.length > 0 && (
-                    <TableContainer sx={{ maxHeight: 300, mt: 1 }}>
-                      <Table size="small">
-                        <TableHead>
-                          <TableRow>
-                            {Object.keys(stmt.result.rows[0]).map((column) => (
-                              <TableCell key={column} sx={{ fontWeight: 'bold' }}>
-                                {column}
-                              </TableCell>
-                            ))}
-                          </TableRow>
-                        </TableHead>
-                        <TableBody>
-                          {stmt.result.rows.map((row, rowIndex) => (
-                            <TableRow key={rowIndex} hover>
-                              {Object.values(row).map((value: any, cellIndex) => (
-                                <TableCell key={cellIndex}>
-                                  {value === null
-                                    ? <em style={{ color: 'gray' }}>NULL</em>
-                                    : typeof value === 'object'
-                                    ? JSON.stringify(value)
-                                    : String(value)}
-                                </TableCell>
-                              ))}
-                            </TableRow>
-                          ))}
-                        </TableBody>
-                      </Table>
-                    </TableContainer>
-                  )}
-                </Stack>
-              </Paper>
-            );
+                    {stmt.success && stmt.result && stmt.result.rows && stmt.result.rows.length > 0 && (
+                      <Box sx={{ mt: 1 }}>
+                        <VirtualizedTable
+                          rows={stmt.result.rows}
+                          columns={Object.keys(stmt.result.rows[0]).map((col) => ({ key: col, label: col }))}
+                          height={300}
+                        />
+                      </Box>
+                    )}
+                  </Stack>
+                </Paper>
+              );
             })}
           </Stack>
         </Box>
       );
     }
 
-    // Single statement error check (after multi-statement check)
+    // Single statement error
     if (!data.success) {
       return (
         <Alert severity="error" icon={<ErrorIcon />}>
@@ -268,19 +216,19 @@ const ResultsPanel = ({ result }: ResultsPanelProps) => {
       );
     }
 
-    // Single statement result (original behavior)
+    // Single statement result
     const rows = data.result?.rows || [];
     const rowCount = data.result?.rowCount || 0;
 
     return (
       <Box>
-        {/* Success Header */}
-        <Stack direction="row" spacing={2} alignItems="center" sx={{ mb: 2 }}>
+        <Stack direction="row" spacing={2} alignItems="center" sx={{ mb: 2, flexWrap: 'wrap' }}>
           <Chip
             icon={<CheckCircleIcon />}
             label="Success"
             color="success"
             size="medium"
+            sx={{ boxShadow: GLOW_SUCCESS }}
           />
           <Chip
             label={`${rowCount} row${rowCount !== 1 ? 's' : ''}`}
@@ -297,72 +245,29 @@ const ResultsPanel = ({ result }: ResultsPanelProps) => {
             sx={{ fontWeight: 600, fontSize: '0.875rem' }}
           />
           <Box sx={{ flexGrow: 1 }} />
-          <Button
-            size="small"
-            startIcon={<DownloadIcon />}
-            onClick={() => exportToCSV(rows, `${cloudName}-results.csv`)}
-          >
+          <Button size="small" startIcon={<DownloadIcon />} onClick={() => exportToCSV(rows, `${cloudName}-results.csv`)}>
             CSV
           </Button>
-          <Button
-            size="small"
-            startIcon={<DownloadIcon />}
-            onClick={() => exportToJSON(rows, `${cloudName}-results.json`)}
-          >
+          <Button size="small" startIcon={<DownloadIcon />} onClick={() => exportToJSON(rows, `${cloudName}-results.json`)}>
             JSON
           </Button>
         </Stack>
 
-        {/* Tabs */}
         <Tabs value={tab} onChange={(_, v) => setTab(v)} sx={{ mb: 2 }}>
           <Tab label="Table View" value="table" />
           <Tab label="JSON View" value="json" />
         </Tabs>
 
-        {/* Table View */}
         {tab === 'table' && rows.length > 0 && (
-          <TableContainer sx={{ maxHeight: 400 }}>
-            <Table size="small" stickyHeader>
-              <TableHead>
-                <TableRow>
-                  {Object.keys(rows[0]).map((column) => (
-                    <TableCell key={column} sx={{ fontWeight: 'bold' }}>
-                      {column}
-                    </TableCell>
-                  ))}
-                </TableRow>
-              </TableHead>
-              <TableBody>
-                {rows.map((row, index) => (
-                  <TableRow key={index} hover>
-                    {Object.values(row).map((value: any, cellIndex) => (
-                      <TableCell key={cellIndex}>
-                        {value === null
-                          ? <em style={{ color: 'gray' }}>NULL</em>
-                          : typeof value === 'object'
-                          ? JSON.stringify(value)
-                          : String(value)}
-                      </TableCell>
-                    ))}
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </TableContainer>
+          <VirtualizedTable
+            rows={rows}
+            columns={Object.keys(rows[0]).map((col) => ({ key: col, label: col }))}
+            height={400}
+          />
         )}
 
-        {/* JSON View */}
         {tab === 'json' && (
-          <Paper
-            variant="outlined"
-            sx={{
-              p: 2,
-              bgcolor: '#1e1e1e',
-              color: '#d4d4d4',
-              maxHeight: 400,
-              overflow: 'auto',
-            }}
-          >
+          <Paper variant="outlined" sx={{ p: 2, bgcolor: 'background.default', color: 'text.primary', maxHeight: 400, overflow: 'auto' }}>
             <pre style={{ margin: 0, fontSize: '0.875rem' }}>
               {JSON.stringify(rows, null, 2)}
             </pre>
@@ -383,7 +288,6 @@ const ResultsPanel = ({ result }: ResultsPanelProps) => {
       </Typography>
 
       <Stack spacing={3}>
-        {/* Render results for each cloud dynamically */}
         {cloudResults.map(({ cloudName, data }, index) => {
           const expanded = isCloudExpanded(cloudName);
           const color = index === 0 ? 'primary.main' : index === 1 ? 'secondary.main' : 'info.main';
@@ -426,4 +330,4 @@ const ResultsPanel = ({ result }: ResultsPanelProps) => {
   );
 };
 
-export default ResultsPanel;
+export default memo(ResultsPanel);

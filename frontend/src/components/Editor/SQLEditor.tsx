@@ -1,4 +1,6 @@
+import { memo } from 'react';
 import { Editor } from '@monaco-editor/react';
+import type { Monaco } from '@monaco-editor/react';
 import { Box, Paper, Button, Stack, Typography, IconButton, Tooltip } from '@mui/material';
 import FormatAlignLeftIcon from '@mui/icons-material/FormatAlignLeft';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
@@ -8,6 +10,41 @@ import { format } from 'sql-formatter';
 import toast from 'react-hot-toast';
 import { useAutoSave } from '../../hooks/useAutoSave';
 import { formatDistanceToNow } from 'date-fns';
+
+const handleBeforeMount = (monaco: Monaco) => {
+  monaco.editor.defineTheme('dual-db-dark', {
+    base: 'vs-dark',
+    inherit: true,
+    rules: [
+      { token: 'keyword', foreground: '6C8EEF', fontStyle: 'bold' },
+      { token: 'keyword.sql', foreground: '6C8EEF', fontStyle: 'bold' },
+      { token: 'string', foreground: '34D399' },
+      { token: 'string.sql', foreground: '34D399' },
+      { token: 'number', foreground: 'FBBF24' },
+      { token: 'number.sql', foreground: 'FBBF24' },
+      { token: 'comment', foreground: '475569', fontStyle: 'italic' },
+      { token: 'comment.sql', foreground: '475569', fontStyle: 'italic' },
+      { token: 'operator', foreground: 'A78BFA' },
+      { token: 'operator.sql', foreground: 'A78BFA' },
+      { token: 'predefined.sql', foreground: '6C8EEF' },
+      { token: 'type', foreground: '6C8EEF' },
+      { token: 'identifier', foreground: 'E2E8F0' },
+    ],
+    colors: {
+      'editor.background': '#0D0D14',
+      'editor.foreground': '#E2E8F0',
+      'editor.lineHighlightBackground': '#ffffff08',
+      'editor.selectionBackground': '#6C8EEF30',
+      'editorCursor.foreground': '#6C8EEF',
+      'editorLineNumber.foreground': '#475569',
+      'editorLineNumber.activeForeground': '#94A3B8',
+      'scrollbarSlider.background': '#ffffff15',
+      'scrollbarSlider.hoverBackground': '#ffffff25',
+      'scrollbarSlider.activeBackground': '#6C8EEF40',
+      'editorGutter.background': '#0D0D14',
+    },
+  });
+};
 
 const SQLEditor = () => {
   const { currentQuery, setCurrentQuery, setEditorInstance } = useAppStore();
@@ -85,7 +122,8 @@ const SQLEditor = () => {
           value={currentQuery}
           onChange={(value) => setCurrentQuery(value || '')}
           onMount={handleEditorDidMount}
-          theme="vs-dark"
+          beforeMount={handleBeforeMount}
+          theme="dual-db-dark"
           options={{
             minimap: { enabled: false },
             fontSize: 14,
@@ -113,4 +151,4 @@ const SQLEditor = () => {
   );
 };
 
-export default SQLEditor;
+export default memo(SQLEditor);

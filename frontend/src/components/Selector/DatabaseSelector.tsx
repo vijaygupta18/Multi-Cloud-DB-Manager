@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef, useCallback } from 'react';
 import {
   Box,
   FormControl,
@@ -358,7 +358,7 @@ const DatabaseSelector = ({ onExecute }: DatabaseSelectorProps) => {
     }
   };
 
-  const handleCancelExecution = async () => {
+  const handleCancelExecution = useCallback(async () => {
     if (!currentExecutionId) return;
 
     try {
@@ -367,9 +367,9 @@ const DatabaseSelector = ({ onExecute }: DatabaseSelectorProps) => {
     } catch (error: any) {
       toast.error(error.response?.data?.error || 'Failed to cancel query');
     }
-  };
+  }, [currentExecutionId]);
 
-  const handleExecute = async () => {
+  const handleExecute = useCallback(async () => {
     const queryToExecute = getQueryToExecute();
 
     if (!queryToExecute.trim()) {
@@ -388,7 +388,18 @@ const DatabaseSelector = ({ onExecute }: DatabaseSelectorProps) => {
 
     // No warning, execute directly
     await executeQueryInternal();
-  };
+  }, [getQueryToExecute, user?.role]);
+
+  // Register handlers on store refs for keyboard shortcuts
+  const { executeRef, cancelRef } = useAppStore();
+  useEffect(() => {
+    executeRef.current = handleExecute;
+    cancelRef.current = handleCancelExecution;
+    return () => {
+      executeRef.current = null;
+      cancelRef.current = null;
+    };
+  }, [handleExecute, handleCancelExecution, executeRef, cancelRef]);
 
   const handleConfirmExecution = async (password?: string) => {
     setShowWarningDialog(false);
@@ -427,7 +438,7 @@ const DatabaseSelector = ({ onExecute }: DatabaseSelectorProps) => {
 
       <Paper elevation={2} sx={{ p: 2 }}>
         <Stack spacing={2}>
-          <Stack direction="row" spacing={2} alignItems="center">
+          <Stack direction="row" spacing={2} alignItems="center" sx={{ flexWrap: 'wrap', rowGap: 1 }}>
             {/* Database Selector */}
             <FormControl sx={{ flex: 1 }}>
               <InputLabel>Database</InputLabel>

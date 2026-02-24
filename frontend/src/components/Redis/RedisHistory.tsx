@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, memo } from 'react';
 import {
   Box,
   Paper,
@@ -12,6 +12,7 @@ import {
   Divider,
   Alert,
   Button,
+  Skeleton,
 } from '@mui/material';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
@@ -111,8 +112,13 @@ const RedisHistory = () => {
       {/* List */}
       <Box sx={{ flexGrow: 1, overflow: 'auto' }}>
         {loading ? (
-          <Box sx={{ p: 2, textAlign: 'center' }}>
-            <Typography color="text.secondary">Loading...</Typography>
+          <Box sx={{ p: 2 }}>
+            {[...Array(6)].map((_, i) => (
+              <Box key={i} sx={{ mb: 2 }}>
+                <Skeleton variant="text" width="70%" height={20} />
+                <Skeleton variant="text" width="40%" height={16} sx={{ mt: 0.5 }} />
+              </Box>
+            ))}
           </Box>
         ) : history.length === 0 ? (
           <Box sx={{ p: 2 }}>
@@ -242,4 +248,4 @@ const RedisHistory = () => {
   );
 };
 
-export default RedisHistory;
+export default memo(RedisHistory);
