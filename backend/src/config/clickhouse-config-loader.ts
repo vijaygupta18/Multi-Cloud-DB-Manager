@@ -35,22 +35,22 @@ function substituteEnvVars(raw: string): string {
 /**
  * Load ClickHouse configuration.
  * Priority:
- *   1. CLICKHOUSE_CONFIG env var (base64-encoded JSON)
+ *   1. CLICKHOUSE_CONFIGS env var (base64-encoded JSON) — set via Kubernetes Secret
  *   2. /config/clickhouse.json  (Kubernetes mount)
  *   3. backend/config/clickhouse.json  (local file)
  *
  * Returns null if no config is found (ClickHouse sync will be disabled).
  */
 export function loadClickHouseConfig(): ClickHouseConfig | null {
-    // 1. Base64-encoded env var
-    if (process.env.CLICKHOUSE_CONFIG) {
+    // 1. Base64-encoded env var (matches CLICKHOUSE_CONFIGS key in k8s/secrets.yaml)
+    if (process.env.CLICKHOUSE_CONFIGS) {
         try {
-            const raw = Buffer.from(process.env.CLICKHOUSE_CONFIG, 'base64').toString('utf-8');
+            const raw = Buffer.from(process.env.CLICKHOUSE_CONFIGS, 'base64').toString('utf-8');
             const config: ClickHouseConfig = JSON.parse(substituteEnvVars(raw));
-            logger.info('ClickHouse config loaded from CLICKHOUSE_CONFIG env var');
+            logger.info('ClickHouse config loaded from CLICKHOUSE_CONFIGS env var');
             return config;
         } catch (err) {
-            logger.error('Failed to parse CLICKHOUSE_CONFIG env var:', err);
+            logger.error('Failed to parse CLICKHOUSE_CONFIGS env var:', err);
             throw err;
         }
     }
