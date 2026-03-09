@@ -224,7 +224,6 @@ export class ClickHouseSyncService {
         }
 
         const { config } = chManager;
-        const chDb = config.database;
         const cluster = config.cluster;
         const kafkaCfg = config.kafka;
 
@@ -239,6 +238,11 @@ export class ClickHouseSyncService {
         for (const stmt of statements) {
             const parsed = parseDDL(stmt, pgSchema);
             if (parsed.kind === 'SKIP') continue;
+
+            // Use the PG schema (parsed from SQL) as the CH database.
+            // e.g. CREATE TABLE atlas_app.orders → CH database = "atlas_app"
+            // Falls back to pgSchema default if no schema qualifier in the SQL.
+            const chDb = parsed.schema;
 
             try {
                 const result = parsed.kind === 'CREATE_TABLE'
