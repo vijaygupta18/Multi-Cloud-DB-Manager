@@ -1,0 +1,433 @@
+import { Pool } from 'pg';
+import logger from '../../utils/logger';
+import ClickHouseClientManager from '../../config/clickhouse';
+import { ClickHouseKafkaConfig } from '../../config/clickhouse-config-loader';
+import ClickHouseTypeMapper from './ClickHouseTypeMapper';
+import ClickHouseDDLBuilder, { CHColumn } from './ClickHouseDDLBuilder';
+
+// ──────────────────────────────────────────────
+// Types
+// ──────────────────────────────────────────────
+
+export interface CHSyncResult {
+    success: boolean;
+    action: 'created' | 'altered' | 'skipped' | 'disabled';
+    table?: string;
+    details: string;
+    error?: string;
+}
+
+interface ParsedCreateTable {
+    kind: 'CREATE_TABLE';
+    schema: string;
+    table: string;
+}
+
+interface ParsedAlterAddColumn {
+    kind: 'ALTER_ADD_COLUMN';
+    schema: string;
+    table: string;
+    columns: string[];   // new column names
+}
+
+type ParsedDDL = ParsedCreateTable | ParsedAlterAddColumn | { kind: 'SKIP' };
+
+// ──────────────────────────────────────────────
+// SQL Parser helpers
+// ──────────────────────────────────────────────
+
+/**
+ * Strip SQL comments and normalise whitespace for pattern matching.
+ */
+function clean(sql: string): string {
+    return sql
+        .replace(/--.*$/gm, '')
+        .replace(/\/\*[\s\S]*?\*\//g, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+/**
+ * Parse the SQL and return what kind of DDL it is (or SKIP).
+ * Handles both schema-qualified and unqualified table names.
+ */
+function parseDDL(sql: string, defaultSchema: string): ParsedDDL {
+    const c = clean(sql);
+
+    // ── CREATE TABLE ──────────────────────────────────────
+    // Matches: CREATE [TEMP] TABLE [IF NOT EXISTS] [schema.]table
+    const createMatch = c.match(
+        /CREATE\s+(?:TEMP\s+|TEMPORARY\s+)?TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?([a-zA-Z0-9_]+(?:\.[a-zA-Z0-9_]+)?)\s*\(/i,
+    );
+    if (createMatch) {
+        const [schema, table] = qualifiedName(createMatch[1], defaultSchema);
+        return { kind: 'CREATE_TABLE', schema, table };
+    }
+
+    // ── ALTER TABLE ADD COLUMN ────────────────────────────
+    // Matches: ALTER TABLE [schema.]table ADD [COLUMN] col_name ...
+    const alterMatch = c.match(
+        /ALTER\s+TABLE\s+([a-zA-Z0-9_]+(?:\.[a-zA-Z0-9_]+)?)\s+ADD\s+(?:COLUMN\s+)?(?:IF\s+NOT\s+EXISTS\s+)?([a-zA-Z0-9_]+)/i,
+    );
+    if (alterMatch) {
+        // Collect ALL ADD COLUMN targets (there may be multiple via ADD COLUMN ... ADD COLUMN ...)
+        const [schema, table] = qualifiedName(alterMatch[1], defaultSchema);
+        const newCols = extractAddedColumns(c);
+        if (newCols.length === 0) return { kind: 'SKIP' };
+        return { kind: 'ALTER_ADD_COLUMN', schema, table, columns: newCols };
+    }
+
+    return { kind: 'SKIP' };
+}
+
+/** Split "schema.table" → [schema, table], defaulting schema when absent. */
+function qualifiedName(raw: string, defaultSchema: string): [string, string] {
+    const parts = raw.split('.');
+    return parts.length === 2 ? [parts[0], parts[1]] : [defaultSchema, parts[0]];
+}
+
+/**
+ * Extract all column names from ADD COLUMN / ADD COLUMN IF NOT EXISTS clauses.
+ */
+function extractAddedColumns(cleanedSql: string): string[] {
+    const cols: string[] = [];
+    // Match every occurrence of ADD [COLUMN] [IF NOT EXISTS] <name>
+    const re = /ADD\s+(?:COLUMN\s+)?(?:IF\s+NOT\s+EXISTS\s+)?([a-zA-Z0-9_]+)/gi;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(cleanedSql)) !== null) {
+        cols.push(m[1]);
+    }
+    return cols;
+}
+
+// ──────────────────────────────────────────────
+// PG introspection
+// ──────────────────────────────────────────────
+
+/**
+ * Fetch full column list for a table from PG information_schema.
+ */
+async function pgColumns(
+    pool: Pool,
+    schema: string,
+    table: string,
+): Promise<Array<{ column_name: string; data_type: string; is_nullable: string; udt_name: string }>> {
+    const { rows } = await pool.query(
+        `SELECT column_name, data_type, is_nullable, udt_name
+     FROM information_schema.columns
+     WHERE table_schema = $1 AND table_name = $2
+     ORDER BY ordinal_position`,
+        [schema, table],
+    );
+    return rows;
+}
+
+/**
+ * Fetch only specific column(s) by name from PG information_schema.
+ */
+async function pgColumnsFor(
+    pool: Pool,
+    schema: string,
+    table: string,
+    columnNames: string[],
+): Promise<Array<{ column_name: string; data_type: string; is_nullable: string; udt_name: string }>> {
+    const { rows } = await pool.query(
+        `SELECT column_name, data_type, is_nullable, udt_name
+     FROM information_schema.columns
+     WHERE table_schema = $1 AND table_name = $2
+       AND column_name = ANY($3::text[])
+     ORDER BY ordinal_position`,
+        [schema, table, columnNames],
+    );
+    return rows;
+}
+
+/**
+ * Map PG rows → CHColumn array.
+ */
+function mapColumns(
+    rows: Array<{ column_name: string; data_type: string; is_nullable: string; udt_name: string }>,
+): CHColumn[] {
+    return rows.map(r => ({
+        name: r.column_name,
+        chType: ClickHouseTypeMapper.map(r.data_type, r.udt_name, r.is_nullable),
+    }));
+}
+
+// ──────────────────────────────────────────────
+// CH system.columns fetch (for ALTER rebuild)
+// ──────────────────────────────────────────────
+
+/**
+ * Fetch the current column list from ClickHouse system.columns.
+ * Used to rebuild queue + MV DDL from scratch after an ALTER ADD COLUMN.
+ * The `date` sentinel column is excluded (it's managed separately in the main table).
+ */
+async function chCurrentColumns(
+    chManager: ClickHouseClientManager,
+    db: string,
+    table: string,
+): Promise<CHColumn[]> {
+    const rows = await chManager.query<{ name: string; type: string }>(
+        `SELECT name, type
+     FROM system.columns
+     WHERE database = '${db}' AND table = '${table}'
+     ORDER BY position`,
+    );
+    // Exclude the `date` sentinel column — it only belongs on the main table
+    return rows
+        .filter(r => r.name !== 'date')
+        .map(r => ({ name: r.name, chType: r.type }));
+}
+
+/**
+ * Fetch the column list from the queue table (e.g. {table}_queue).
+ * Used to detect whether the queue uses Pattern A (JSONEachRow, multiple columns)
+ * or Pattern B (JSONAsString, single `message` column).
+ */
+async function chQueueColumns(
+    chManager: ClickHouseClientManager,
+    db: string,
+    table: string,
+): Promise<CHColumn[]> {
+    const rows = await chManager.query<{ name: string; type: string }>(
+        `SELECT name, type
+     FROM system.columns
+     WHERE database = '${db}' AND table = '${table}_queue'
+     ORDER BY position`,
+    );
+    return rows.map(r => ({ name: r.name, chType: r.type }));
+}
+
+// ──────────────────────────────────────────────
+// Main service
+// ──────────────────────────────────────────────
+
+export class ClickHouseSyncService {
+    /**
+     * Called non-blocking after each successful PG execution.
+     * Parses the SQL, determines the DDL action, and mirrors it to ClickHouse.
+     *
+     * @param sql          - The SQL that was executed in PG
+     * @param pgPool       - The PG connection pool to introspect schema info
+     * @param pgSchema     - The default schema used for the query (e.g. "atlas_driver_offer_bpp")
+     */
+    public async syncAfterQuery(
+        sql: string,
+        pgPool: Pool,
+        pgSchema: string,
+    ): Promise<CHSyncResult> {
+        // Check if ClickHouse is configured
+        const chManager = ClickHouseClientManager.getInstance();
+        if (!chManager) {
+            return { success: true, action: 'disabled', details: 'ClickHouse not configured' };
+        }
+
+        const { config } = chManager;
+        const chDb = config.database;
+        const cluster = config.cluster;
+        const kafkaCfg = config.kafka;
+
+        // Parse each statement in the SQL (semicolon-separated)
+        const statements = sql
+            .split(';')
+            .map(s => s.trim())
+            .filter(Boolean);
+
+        const results: CHSyncResult[] = [];
+
+        for (const stmt of statements) {
+            const parsed = parseDDL(stmt, pgSchema);
+            if (parsed.kind === 'SKIP') continue;
+
+            try {
+                const result = parsed.kind === 'CREATE_TABLE'
+                    ? await this.handleCreateTable(parsed, pgPool, chManager, chDb, cluster, kafkaCfg)
+                    : await this.handleAlterAddColumn(parsed, pgPool, chManager, chDb, cluster, kafkaCfg);
+                results.push(result);
+            } catch (err: any) {
+                logger.error('ClickHouse sync error', { stmt: stmt.slice(0, 100), error: err.message });
+                results.push({
+                    success: false,
+                    action: parsed.kind === 'CREATE_TABLE' ? 'created' : 'altered',
+                    table: parsed.table,
+                    details: 'CH sync failed',
+                    error: err.message,
+                });
+            }
+        }
+
+        if (results.length === 0) {
+            return { success: true, action: 'skipped', details: 'No DDL statements detected' };
+        }
+
+        // If multiple statements, roll up into one result
+        const allOk = results.every(r => r.success);
+        return {
+            success: allOk,
+            action: results[0].action,
+            table: results.map(r => r.table).filter(Boolean).join(', '),
+            details: results.map(r => r.details).join(' | '),
+            error: results.map(r => r.error).filter(Boolean).join(' | ') || undefined,
+        };
+    }
+
+    // ──────────────────────────────────────────────
+    // CREATE TABLE flow
+    // ──────────────────────────────────────────────
+
+    private async handleCreateTable(
+        parsed: ParsedCreateTable,
+        pgPool: Pool,
+        ch: ClickHouseClientManager,
+        chDb: string,
+        cluster: string,
+        kafkaCfg: ClickHouseKafkaConfig,
+    ): Promise<CHSyncResult> {
+        const { schema, table } = parsed;
+        logger.info(`CH sync: CREATE TABLE ${schema}.${table}`);
+
+        // 1. Fetch columns from PG
+        const pgRows = await pgColumns(pgPool, schema, table);
+        if (pgRows.length === 0) {
+            return {
+                success: false,
+                action: 'created',
+                table,
+                details: `Table ${schema}.${table} not found in PG information_schema after CREATE`,
+                error: 'Table not found in PG',
+            };
+        }
+        const columns = mapColumns(pgRows);
+
+        // 2. Build and execute CH main table DDL
+        const createTableDDL = ClickHouseDDLBuilder.buildCreateTable(chDb, table, cluster, columns);
+        logger.debug('CH CREATE TABLE DDL', { ddl: createTableDDL });
+        await ch.exec(createTableDDL);
+
+        // 3. Build and execute queue DDL
+        const queueDDL = ClickHouseDDLBuilder.buildQueue(chDb, table, cluster, columns, kafkaCfg);
+        logger.debug('CH CREATE QUEUE DDL', { ddl: queueDDL });
+        await ch.exec(queueDDL);
+
+        // 4. Build and execute MV DDL
+        const mvDDL = ClickHouseDDLBuilder.buildMaterializedView(chDb, table, cluster, columns);
+        logger.debug('CH CREATE MV DDL', { ddl: mvDDL });
+        await ch.exec(mvDDL);
+
+        logger.info(`CH sync: created ${table}, ${table}_queue, ${table}_mv in ${chDb}`);
+
+        return {
+            success: true,
+            action: 'created',
+            table,
+            details: `Created ${chDb}.${table}, ${chDb}.${table}_queue, ${chDb}.${table}_mv`,
+        };
+    }
+
+    // ──────────────────────────────────────────────
+    // ALTER TABLE ADD COLUMN flow
+    // ──────────────────────────────────────────────
+
+    private async handleAlterAddColumn(
+        parsed: ParsedAlterAddColumn,
+        pgPool: Pool,
+        ch: ClickHouseClientManager,
+        chDb: string,
+        cluster: string,
+        kafkaCfg: ClickHouseKafkaConfig,
+    ): Promise<CHSyncResult> {
+        const { schema, table, columns: newColNames } = parsed;
+        logger.info(`CH sync: ALTER TABLE ${schema}.${table} ADD COLUMN(s): ${newColNames.join(', ')}`);
+
+        // 1. Fetch only the new columns from PG
+        const pgRows = await pgColumnsFor(pgPool, schema, table, newColNames);
+        if (pgRows.length === 0) {
+            return {
+                success: false,
+                action: 'altered',
+                table,
+                details: `New column(s) ${newColNames.join(', ')} not found in PG information_schema`,
+                error: 'Columns not found in PG',
+            };
+        }
+        const newColumns = mapColumns(pgRows).map(col => ({
+            ...col,
+            // Force Nullable for ALTER ADD COLUMN — newly added columns
+            // typically don't specify NOT NULL, and Kafka data may not
+            // include the new field for existing rows.
+            chType: col.chType.startsWith('Nullable(') || col.chType.startsWith('Array(')
+                ? col.chType
+                : `Nullable(${col.chType})`,
+        }));
+
+        // 2. ALTER the main CH table for each new column
+        for (const col of newColumns) {
+            const alterDDL = ClickHouseDDLBuilder.buildAlterAddColumn(chDb, table, cluster, col);
+            logger.debug('CH ALTER TABLE DDL', { ddl: alterDDL });
+            await ch.exec(alterDDL);
+        }
+
+        // 3. Read current full column list from CH system.columns (post-ALTER)
+        //    This is the source of truth for rebuilding queue + MV.
+        //    We do NOT parse system.tables.create_table_query — it omits ON CLUSTER.
+        const currentCols = await chCurrentColumns(ch, chDb, table);
+
+        if (currentCols.length === 0) {
+            return {
+                success: false,
+                action: 'altered',
+                table,
+                details: `Could not read columns from CH system.columns for ${chDb}.${table}`,
+                error: 'CH system.columns returned empty',
+            };
+        }
+
+        // 4. Detect queue pattern: Pattern A (JSONEachRow, multiple columns)
+        //    vs Pattern B (JSONAsString, single `message` column).
+        const queueCols = await chQueueColumns(ch, chDb, table);
+        const isPatternB = queueCols.length === 1 && queueCols[0].name === 'message';
+
+        logger.info(`CH sync: detected ${isPatternB ? 'Pattern B (JSONAsString)' : 'Pattern A (JSONEachRow)'} for ${table}_queue`);
+
+        // 5. DROP MV and Queue (order matters — MV first, queue second)
+        const dropMvDDL = ClickHouseDDLBuilder.buildDropTable(chDb, `${table}_mv`, cluster);
+        logger.debug('CH DROP MV', { ddl: dropMvDDL });
+        await ch.exec(dropMvDDL);
+
+        const dropQueueDDL = ClickHouseDDLBuilder.buildDropTable(chDb, `${table}_queue`, cluster);
+        logger.debug('CH DROP QUEUE', { ddl: dropQueueDDL });
+        await ch.exec(dropQueueDDL);
+
+        // 6. Rebuild queue + MV using the detected pattern
+        let newQueueDDL: string;
+        let newMvDDL: string;
+
+        if (isPatternB) {
+            // Pattern B: JSONAsString queue + JSONExtract MV
+            newQueueDDL = ClickHouseDDLBuilder.buildQueueJsonAsString(chDb, table, cluster, kafkaCfg);
+            newMvDDL = ClickHouseDDLBuilder.buildMvJsonAsString(chDb, table, cluster, currentCols);
+        } else {
+            // Pattern A: JSONEachRow queue + SELECT * MV
+            newQueueDDL = ClickHouseDDLBuilder.buildQueue(chDb, table, cluster, currentCols, kafkaCfg);
+            newMvDDL = ClickHouseDDLBuilder.buildMaterializedView(chDb, table, cluster, currentCols);
+        }
+
+        logger.debug('CH RECREATE QUEUE DDL', { ddl: newQueueDDL });
+        await ch.exec(newQueueDDL);
+
+        logger.debug('CH RECREATE MV DDL', { ddl: newMvDDL });
+        await ch.exec(newMvDDL);
+
+        logger.info(`CH sync: altered ${table} (+${newColNames.join(', ')}), rebuilt queue+MV (${isPatternB ? 'Pattern B' : 'Pattern A'})`);
+
+        return {
+            success: true,
+            action: 'altered',
+            table,
+            details: `Added column(s) [${newColNames.join(', ')}] to ${chDb}.${table}; rebuilt ${table}_queue and ${table}_mv (${isPatternB ? 'JSONAsString' : 'JSONEachRow'})`,
+        };
+    }
+}
+
+export default new ClickHouseSyncService();
