@@ -12,6 +12,10 @@ backend/config/clickhouse.json
 !backend/config/databases.example.json
 !backend/config/databases.local.json
 
+# Kubernetes secrets with real credentials
+k8s/secrets.yaml
+!k8s/secrets.yaml.example
+
 
 # Dependencies
 node_modules/
