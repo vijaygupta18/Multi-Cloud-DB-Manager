@@ -226,6 +226,7 @@ export class ClickHouseSyncService {
         const { config } = chManager;
         const cluster = config.cluster;
         const kafkaCfg = config.kafka;
+        const selectUsers = config.selectUsers ?? [];
 
         // Parse each statement in the SQL (semicolon-separated)
         const statements = sql
@@ -246,7 +247,7 @@ export class ClickHouseSyncService {
 
             try {
                 const result = parsed.kind === 'CREATE_TABLE'
-                    ? await this.handleCreateTable(parsed, pgPool, chManager, chDb, cluster, kafkaCfg)
+                    ? await this.handleCreateTable(parsed, pgPool, chManager, chDb, cluster, kafkaCfg, selectUsers)
                     : await this.handleAlterAddColumn(parsed, pgPool, chManager, chDb, cluster, kafkaCfg);
                 results.push(result);
             } catch (err: any) {
@@ -287,6 +288,7 @@ export class ClickHouseSyncService {
         chDb: string,
         cluster: string,
         kafkaCfg: ClickHouseKafkaConfig,
+        selectUsers: string[] = [],
     ): Promise<CHSyncResult> {
         const { schema, table } = parsed;
         logger.info(`CH sync: CREATE TABLE ${schema}.${table}`);
@@ -318,6 +320,13 @@ export class ClickHouseSyncService {
         const mvDDL = ClickHouseDDLBuilder.buildMaterializedView(chDb, table, cluster, columns);
         logger.debug('CH CREATE MV DDL', { ddl: mvDDL });
         await ch.exec(mvDDL);
+
+        // 5. Grant SELECT on main table to configured users (if any)
+        if (selectUsers.length > 0) {
+            const grantDDL = ClickHouseDDLBuilder.buildGrant(chDb, table, cluster, selectUsers);
+            logger.debug('CH GRANT DDL', { ddl: grantDDL });
+            await ch.exec(grantDDL);
+        }
 
         logger.info(`CH sync: created ${table}, ${table}_queue, ${table}_mv in ${chDb}`);
 

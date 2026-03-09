@@ -339,6 +339,14 @@ export class ClickHouseDDLBuilder {
     public static buildDropTable(db: string, table: string, cluster: string): string {
         return `DROP TABLE IF EXISTS ${db}.${table} ON CLUSTER '${cluster}'`;
     }
+
+    /**
+     * Build GRANT SELECT DDL for the main table on a cluster.
+     */
+    public static buildGrant(db: string, table: string, cluster: string, users: string[]): string {
+        const userList = users.join(', ');
+        return `GRANT SELECT ON ${db}.${table} ON CLUSTER '${cluster}' TO ${userList}`;
+    }
 }
 
 export default ClickHouseDDLBuilder;

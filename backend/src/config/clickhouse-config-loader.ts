@@ -16,6 +16,7 @@ export interface ClickHouseConfig {
     database: string;
     cluster: string;
     kafka: ClickHouseKafkaConfig;
+    selectUsers?: string[];   // users to GRANT SELECT on newly created tables
 }
 
 /**
