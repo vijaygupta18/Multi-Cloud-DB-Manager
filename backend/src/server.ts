@@ -118,8 +118,10 @@ app.use('/api/replication', replicationRoutes);
 console.log('[STARTUP] ✓ /api/replication routes mounted');
 app.use('/api/redis', redisRoutes);
 console.log('[STARTUP] ✓ /api/redis routes mounted');
-app.use('/api/clickhouse', clickhouseRoutes);
-console.log('[STARTUP] ✓ /api/clickhouse routes mounted');
+if (process.env.SYNC_TO_CLICKHOUSE !== 'false') {
+  app.use('/api/clickhouse', clickhouseRoutes);
+  console.log('[STARTUP] ✓ /api/clickhouse routes mounted');
+}
 
 // 404 handler
 app.use(notFoundHandler);
@@ -145,11 +147,13 @@ const shutdown = async () => {
     }
 
     // Close ClickHouse client
-    try {
-      const chClient = ClickHouseClientManager.getInstance();
-      if (chClient) await chClient.shutdown();
-    } catch (e) {
-      // ClickHouse may not be configured
+    if (process.env.SYNC_TO_CLICKHOUSE !== 'false') {
+      try {
+        const chClient = ClickHouseClientManager.getInstance();
+        if (chClient) await chClient.shutdown();
+      } catch (e) {
+        // ClickHouse may not be configured
+      }
     }
 
     // Close Redis connection
@@ -198,17 +202,21 @@ const startServer = async () => {
       console.warn('[STARTUP] Redis Manager initialization warning:', error);
     }
 
-    // Initialize ClickHouse client (optional — disabled if no clickhouse.json)
-    try {
-      const chClient = ClickHouseClientManager.getInstance();
-      if (chClient) {
-        const alive = await chClient.ping();
-        console.log(`[STARTUP] ClickHouse: ${alive ? '✓ connected' : '✗ unreachable'} (${chClient.config.host}/${chClient.config.database})`);
-      } else {
-        console.log('[STARTUP] ClickHouse sync disabled (no clickhouse.json found)');
+    // Initialize ClickHouse client (optional — disabled if no clickhouse.json or SYNC_TO_CLICKHOUSE=false)
+    if (process.env.SYNC_TO_CLICKHOUSE !== 'false') {
+      try {
+        const chClient = ClickHouseClientManager.getInstance();
+        if (chClient) {
+          const alive = await chClient.ping();
+          console.log(`[STARTUP] ClickHouse: ${alive ? '✓ connected' : '✗ unreachable'} (${chClient.config.host}/${chClient.config.database})`);
+        } else {
+          console.log('[STARTUP] ClickHouse sync disabled (no clickhouse.json found)');
+        }
+      } catch (error) {
+        console.warn('[STARTUP] ClickHouse initialization warning:', error);
       }
-    } catch (error) {
-      console.warn('[STARTUP] ClickHouse initialization warning:', error);
+    } else {
+      console.log('[STARTUP] ClickHouse sync disabled (SYNC_TO_CLICKHOUSE=false)');
     }
 
     // Initialize history database schema (if enabled)

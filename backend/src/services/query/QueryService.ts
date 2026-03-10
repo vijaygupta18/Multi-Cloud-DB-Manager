@@ -234,7 +234,7 @@ class QueryService {
       // ── ClickHouse sync (non-blocking, best-effort) ──────────────────
       // Fire after PG execution succeeds — only DDL statements are acted on,
       // everything else is a no-op inside syncAfterQuery.
-      if (response.success) {
+      if (response.success && process.env.SYNC_TO_CLICKHOUSE !== 'false') {
         const pgSchema = request.pgSchema || 'public';
         const dbPools = DatabasePools.getInstance();
         const cloudConfig = dbPools.getCloudConfig();
