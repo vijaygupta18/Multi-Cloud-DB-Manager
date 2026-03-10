@@ -25,7 +25,6 @@
     "passport": "^0.7.0",
     "passport-google-oauth20": "^2.0.0",
     "pg": "^8.11.3",
-    "pg-pool": "^3.6.1",
     "redis": "^4.6.12",
     "sql-formatter": "^15.1.1",
     "uuid": "^9.0.1",
