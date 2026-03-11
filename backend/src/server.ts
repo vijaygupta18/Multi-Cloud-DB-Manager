@@ -22,7 +22,9 @@ import historyRoutes from './routes/history.routes';
 import schemaRoutes from './routes/schema.routes';
 import replicationRoutes from './routes/replication.routes';
 import redisRoutes from './routes/redis.routes';
+import clickhouseRoutes from './routes/clickhouse.routes';
 import RedisManagerPools from './config/redis-pools';
+import ClickHouseClientManager from './config/clickhouse';
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -116,6 +118,10 @@ app.use('/api/replication', replicationRoutes);
 console.log('[STARTUP] ✓ /api/replication routes mounted');
 app.use('/api/redis', redisRoutes);
 console.log('[STARTUP] ✓ /api/redis routes mounted');
+if (process.env.SYNC_TO_CLICKHOUSE !== 'false') {
+  app.use('/api/clickhouse', clickhouseRoutes);
+  console.log('[STARTUP] ✓ /api/clickhouse routes mounted');
+}
 
 // 404 handler
 app.use(notFoundHandler);
@@ -138,6 +144,16 @@ const shutdown = async () => {
       await redisPools.shutdown();
     } catch (e) {
       // Redis Manager may not be configured
+    }
+
+    // Close ClickHouse client
+    if (process.env.SYNC_TO_CLICKHOUSE !== 'false') {
+      try {
+        const chClient = ClickHouseClientManager.getInstance();
+        if (chClient) await chClient.shutdown();
+      } catch (e) {
+        // ClickHouse may not be configured
+      }
     }
 
     // Close Redis connection
@@ -184,6 +200,23 @@ const startServer = async () => {
       }
     } catch (error) {
       console.warn('[STARTUP] Redis Manager initialization warning:', error);
+    }
+
+    // Initialize ClickHouse client (optional — disabled if no clickhouse.json or SYNC_TO_CLICKHOUSE=false)
+    if (process.env.SYNC_TO_CLICKHOUSE !== 'false') {
+      try {
+        const chClient = ClickHouseClientManager.getInstance();
+        if (chClient) {
+          const alive = await chClient.ping();
+          console.log(`[STARTUP] ClickHouse: ${alive ? '✓ connected' : '✗ unreachable'} (${chClient.config.host}/${chClient.config.database})`);
+        } else {
+          console.log('[STARTUP] ClickHouse sync disabled (no clickhouse.json found)');
+        }
+      } catch (error) {
+        console.warn('[STARTUP] ClickHouse initialization warning:', error);
+      }
+    } else {
+      console.log('[STARTUP] ClickHouse sync disabled (SYNC_TO_CLICKHOUSE=false)');
     }
 
     // Initialize history database schema (if enabled)
