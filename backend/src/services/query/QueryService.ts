@@ -5,6 +5,7 @@ import QueryValidator from './QueryValidator';
 import ExecutionManager, { ExecutionResult } from './ExecutionManager';
 import QueryExecutor from './QueryExecutor';
 import historyService from '../history.service';
+import clickHouseSyncService from '../clickhouse/ClickHouseSyncService';
 
 /**
  * QueryService - Main service that orchestrates query execution
@@ -55,7 +56,7 @@ class QueryService {
         // Extract cloudName and databaseName from cloudKey
         const [cloudName, ...dbParts] = cloudKey.split('_');
         const databaseName = dbParts.join('_');
-        
+
         const pool = dbPools.getPoolByName(cloudName, databaseName);
         if (pool) {
           const cancelClient = await pool.connect();
@@ -65,11 +66,11 @@ class QueryService {
           } catch (error: any) {
             // Log but don't fail - query might have already completed
             if (error.code !== '57014') { // query_canceled
-              logger.warn(`Failed to cancel query on ${cloudKey}`, { 
-                executionId, 
-                pid, 
+              logger.warn(`Failed to cancel query on ${cloudKey}`, {
+                executionId,
+                pid,
                 error: error.message,
-                code: error.code 
+                code: error.code
               });
             }
           } finally {
@@ -77,9 +78,9 @@ class QueryService {
           }
         }
       } catch (error: any) {
-        logger.error(`Error during cancellation on ${cloudKey}`, { 
-          executionId, 
-          error: error.message 
+        logger.error(`Error during cancellation on ${cloudKey}`, {
+          executionId,
+          error: error.message
         });
       }
     }
@@ -101,10 +102,10 @@ class QueryService {
   public async startExecution(request: QueryRequest, userId?: string): Promise<string> {
     const { v4: uuidv4 } = require('uuid');
     const executionId = uuidv4();
-    
+
     // Initialize result storage with userId for authorization
     await this.executionManager.initializeExecution(executionId, userId);
-    
+
     // Start execution in background with proper error handling
     this.executeAsync(executionId, request, userId).catch((error) => {
       logger.error('Async execution failed', {
@@ -116,14 +117,14 @@ class QueryService {
       this.executionManager.failExecution(executionId, error.message);
       this.executionManager.completeActiveExecution(executionId);
     });
-    
+
     logger.info('Started async query execution', {
       executionId,
       database: request.database,
       mode: request.mode,
       userId,
     });
-    
+
     return executionId;
   }
 
@@ -132,7 +133,7 @@ class QueryService {
    */
   private async executeAsync(executionId: string, request: QueryRequest, userId?: string): Promise<void> {
     const timeout = Math.min(request.timeout || 300000, 300000);
-    
+
     try {
       // Get cloud configuration
       const cloudConfig = DatabasePools.getInstance().getCloudConfig();
@@ -157,7 +158,7 @@ class QueryService {
       // Execute on each cloud
       const successes: boolean[] = [];
       let wasCancelled = false;
-      
+
       for (const cloudName of cloudsToExecute) {
         // Check if cancelled before starting this cloud
         if (await this.executionManager.isCancelled(executionId)) {
@@ -171,25 +172,25 @@ class QueryService {
           successes.push(false);
           continue; // Continue to add placeholders for remaining clouds
         }
-        
+
         try {
           const result = await this.executor.executeOnDatabase(
-            cloudName, 
-            databaseName, 
-            request.query, 
-            timeout, 
-            pgSchema, 
+            cloudName,
+            databaseName,
+            request.query,
+            timeout,
+            pgSchema,
             request.continueOnError || false,
             executionId
           );
           response[cloudName] = result;
           successes.push(result.success);
-          
+
           // Save partial results immediately after each cloud completes
           // This ensures partial results are available even if cancelled mid-execution
           // Don't mark as complete yet - still running other clouds
-          await this.executionManager.savePartialResults(executionId, {...response});
-          
+          await this.executionManager.savePartialResults(executionId, { ...response });
+
           // Update progress
           if (result.statementCount) {
             await this.executionManager.updateProgress(
@@ -218,7 +219,7 @@ class QueryService {
 
       // Determine overall success
       response.success = successes.length > 0 && successes.every(s => s);
-      
+
       // Update result (respects cancellation status, saves partial results)
       await this.executionManager.completeExecution(executionId, response, response.success);
       this.executionManager.completeActiveExecution(executionId);
@@ -229,7 +230,31 @@ class QueryService {
         cloudsExecuted: cloudsToExecute,
         wasCancelled,
       });
-      
+
+      // ── ClickHouse sync (non-blocking, best-effort) ──────────────────
+      // Fire after PG execution succeeds — only DDL statements are acted on,
+      // everything else is a no-op inside syncAfterQuery.
+      if (response.success && process.env.SYNC_TO_CLICKHOUSE !== 'false') {
+        const pgSchema = request.pgSchema || 'public';
+        const dbPools = DatabasePools.getInstance();
+        const cloudConfig = dbPools.getCloudConfig();
+        // Use the primary cloud pool for CH sync (source of truth)
+        const primaryPool = dbPools.getPoolByName(cloudConfig.primaryCloud, databaseName);
+        if (primaryPool) {
+          clickHouseSyncService
+            .syncAfterQuery(request.query, primaryPool, pgSchema)
+            .then(syncResult => {
+              if (syncResult.action !== 'skipped' && syncResult.action !== 'disabled') {
+                logger.info('ClickHouse sync completed', { executionId, ...syncResult });
+              }
+            })
+            .catch(err => {
+              logger.error('ClickHouse sync failed (non-blocking)', { executionId, error: err.message });
+            });
+        }
+      }
+      // ─────────────────────────────────────────────────────────────────
+
       // Save to history if userId provided (including cancelled queries)
       if (userId) {
         historyService
@@ -252,7 +277,7 @@ class QueryService {
         executionId,
         error: error.message,
       });
-      
+
       // Save failed execution to history
       if (userId) {
         const errorResponse: QueryResponse = {
