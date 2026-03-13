@@ -328,6 +328,7 @@ export class ClickHouseSyncService {
             await ch.exec(grantDDL);
         }
 
+
         logger.info(`CH sync: created ${table}, ${table}_queue, ${table}_mv in ${chDb}`);
 
         return {

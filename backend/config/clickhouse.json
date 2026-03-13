@@ -1,0 +1,13 @@
+{
+    "host": "your-clickhouse-host",
+    "port": 8123,
+    "user": "default",
+    "password": "${CLICKHOUSE_PASSWORD}",
+    "database": "atlas_driver_offer_bpp",
+    "cluster": "your_cluster_name",
+    "kafka": {
+        "brokerList": "your-kafka-broker:9096",
+        "topicMiddle": "sessionizer",
+        "groupSuffix": "ec2-ckh-consumer"
+    }
+}
