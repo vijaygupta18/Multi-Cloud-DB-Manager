@@ -1,7 +1,8 @@
 import { Router } from 'express';
 import { executeQuery, validateQuery, cancelQuery, getActiveExecutions, getExecutionStatus } from '../controllers/query.controller';
+import { startCsvBatch, getCsvBatchStatus, cancelCsvBatch } from '../controllers/csvBatch.controller';
 import { isAuthenticated, validateQueryPermissions } from '../middleware/auth.middleware';
-import { validate, queryExecutionSchema } from '../middleware/validation.middleware';
+import { validate, queryExecutionSchema, csvBatchSchema } from '../middleware/validation.middleware';
 
 const router = Router();
 
@@ -17,10 +18,15 @@ router.get('/status/:executionId', isAuthenticated, getExecutionStatus);
 // Cancel an active query execution
 router.post('/cancel/:executionId', isAuthenticated, cancelQuery);
 
-  // Get list of active query executions
+// Get list of active query executions
 router.get('/active', isAuthenticated, getActiveExecutions);
 
 // Validate query without executing
 router.post('/validate', validateQuery);
+
+// CSV-driven batch query execution
+router.post('/csv-batch', validate(csvBatchSchema), startCsvBatch);
+router.get('/csv-batch/status/:executionId', getCsvBatchStatus);
+router.post('/csv-batch/cancel/:executionId', cancelCsvBatch);
 
 export default router;

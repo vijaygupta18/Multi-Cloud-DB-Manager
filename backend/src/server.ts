@@ -76,7 +76,7 @@ app.use(
   })
 );
 
-app.use(express.json({ limit: '10mb' }));
+app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true }));
 
 // Session middleware
@@ -222,8 +222,8 @@ const startServer = async () => {
     // Initialize history database schema (if enabled)
     if (process.env.RUN_MIGRATIONS === 'true') {
       console.log('[STARTUP] Initializing history schema...');
-      await historyService.initializeSchema();
-      console.log('[STARTUP] History schema initialized');
+        await historyService.initializeSchema();
+        console.log('[STARTUP] History schema initialized');
     } else {
       console.log('[STARTUP] Schema initialization skipped (RUN_MIGRATIONS not set)');
     }

@@ -42,8 +42,8 @@ const savePersistedStringSetting = (key: string, value: string) => {
 
 interface AppState {
   // Manager mode
-  managerMode: 'db' | 'redis';
-  setManagerMode: (mode: 'db' | 'redis') => void;
+  managerMode: 'db' | 'redis' | 'batch';
+  setManagerMode: (mode: 'db' | 'redis' | 'batch') => void;
 
   // User state
   user: User | null;
@@ -90,7 +90,7 @@ interface AppState {
 
 export const useAppStore = create<AppState>((set, get) => ({
   // Manager mode
-  managerMode: loadPersistedStringSetting('managerMode', 'db') as 'db' | 'redis',
+  managerMode: loadPersistedStringSetting('managerMode', 'db') as 'db' | 'redis' | 'batch',
   setManagerMode: (mode) => {
     savePersistedStringSetting('managerMode', mode);
     set({ managerMode: mode });
