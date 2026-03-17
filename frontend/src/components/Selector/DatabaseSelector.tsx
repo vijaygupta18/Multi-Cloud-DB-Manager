@@ -36,6 +36,7 @@ import type { ValidationWarning } from '../../services/queryValidation.service';
 
 interface DatabaseSelectorProps {
   onExecute: (result: QueryResponse) => void;
+  compact?: boolean; // When true, hides Execute/Cancel/ContinueOnError — selector only
 }
 
 interface DatabaseOption {
@@ -47,7 +48,7 @@ interface DatabaseOption {
 
 const POLL_INTERVAL = 1000; // 1 second polling
 
-const DatabaseSelector = ({ onExecute }: DatabaseSelectorProps) => {
+const DatabaseSelector = ({ onExecute, compact = false }: DatabaseSelectorProps) => {
   const selectedDatabase = useAppStore(s => s.selectedDatabase);
   const setSelectedDatabase = useAppStore(s => s.setSelectedDatabase);
   const selectedPgSchema = useAppStore(s => s.selectedPgSchema);
@@ -539,34 +540,36 @@ const DatabaseSelector = ({ onExecute }: DatabaseSelectorProps) => {
               )}
             </Box>
 
-            <Box sx={{ flexGrow: 1 }} />
+            {!compact && <Box sx={{ flexGrow: 1 }} />}
 
-            {/* Continue on Error Toggle */}
-            <Box sx={{ display: 'flex', alignItems: 'center' }}>
-              <Tooltip title="Run all statements even if some fail (e.g., column already exists)">
-                <FormControlLabel
-                  control={
-                    <Checkbox
-                      checked={continueOnError}
-                      onChange={(e) => setContinueOnError(e.target.checked)}
-                      disabled={isExecuting}
-                      size="small"
-                    />
-                  }
-                  label={
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                      <Typography variant="body2" color="text.secondary">
-                        Continue on error
-                      </Typography>
-                      <InfoIcon sx={{ fontSize: 16, color: 'text.secondary' }} />
-                    </Box>
-                  }
-                />
-              </Tooltip>
-            </Box>
+            {/* Continue on Error Toggle — hidden in compact mode */}
+            {!compact && (
+              <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                <Tooltip title="Run all statements even if some fail (e.g., column already exists)">
+                  <FormControlLabel
+                    control={
+                      <Checkbox
+                        checked={continueOnError}
+                        onChange={(e) => setContinueOnError(e.target.checked)}
+                        disabled={isExecuting}
+                        size="small"
+                      />
+                    }
+                    label={
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                        <Typography variant="body2" color="text.secondary">
+                          Continue on error
+                        </Typography>
+                        <InfoIcon sx={{ fontSize: 16, color: 'text.secondary' }} />
+                      </Box>
+                    }
+                  />
+                </Tooltip>
+              </Box>
+            )}
 
-            {/* Execute/Cancel Button */}
-            {isExecuting ? (
+            {/* Execute/Cancel Button — hidden in compact mode */}
+            {!compact && (isExecuting ? (
               <Button
                 variant="contained"
                 color="error"
@@ -589,11 +592,11 @@ const DatabaseSelector = ({ onExecute }: DatabaseSelectorProps) => {
               >
                 Execute
               </Button>
-            )}
+            ))}
           </Stack>
 
-          {/* Progress Bar */}
-          {isExecuting && executionProgress && executionProgress.total > 0 && (
+          {/* Progress Bar — hidden in compact mode */}
+          {!compact && isExecuting && executionProgress && executionProgress.total > 0 && (
             <Box sx={{ width: '100%' }}>
               <LinearProgress 
                 variant="determinate" 
@@ -605,7 +608,7 @@ const DatabaseSelector = ({ onExecute }: DatabaseSelectorProps) => {
             </Box>
           )}
 
-          {isExecuting && (!executionProgress || executionProgress.total === 0) && (
+          {!compact && isExecuting && (!executionProgress || executionProgress.total === 0) && (
             <Box sx={{ width: '100%' }}>
               <LinearProgress />
               <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5 }}>
