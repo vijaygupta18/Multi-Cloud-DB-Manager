@@ -20,6 +20,7 @@ import PeopleIcon from '@mui/icons-material/People';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import StorageIcon from '@mui/icons-material/Storage';
 import MemoryIcon from '@mui/icons-material/Memory';
+import TableRowsIcon from '@mui/icons-material/TableRows';
 import { authAPI, schemaAPI } from '../services/api';
 import { useAppStore } from '../store/appStore';
 import toast from 'react-hot-toast';
@@ -31,6 +32,7 @@ import RedisCommandForm from '../components/Redis/RedisCommandForm';
 import RedisResultsPanel from '../components/Redis/RedisResultsPanel';
 import RedisCacheClearer from '../components/Redis/RedisCacheClearer';
 import RedisHistory from '../components/Redis/RedisHistory';
+import CsvBatchPanel from '../components/CsvBatch/CsvBatchPanel';
 import type { QueryResponse, RedisCommandResponse } from '../types';
 
 const ConsolePage = () => {
@@ -129,7 +131,7 @@ const ConsolePage = () => {
       <AppBar position="static" elevation={2}>
         <Toolbar>
           <Typography variant="h6" component="div" noWrap>
-            {managerMode === 'db' ? 'Multi-Cloud DB Manager' : 'Redis Manager'}
+            {managerMode === 'db' ? 'Multi-Cloud DB Manager' : managerMode === 'redis' ? 'Redis Manager' : 'Batch Query Manager'}
           </Typography>
 
           <Box sx={{ flexGrow: 1 }} />
@@ -149,8 +151,8 @@ const ConsolePage = () => {
               sx={{
                 position: 'absolute',
                 top: 3,
-                left: managerMode === 'db' ? 3 : 'calc(50% + 0px)',
-                width: 'calc(50% - 3px)',
+                left: managerMode === 'db' ? 3 : managerMode === 'redis' ? 'calc(33.33% + 0px)' : 'calc(66.66% + 0px)',
+                width: 'calc(33.33% - 3px)',
                 height: 'calc(100% - 6px)',
                 borderRadius: '17px',
                 bgcolor: 'primary.main',
@@ -160,7 +162,7 @@ const ConsolePage = () => {
                 transition: 'left 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
               }}
             />
-            {(['db', 'redis'] as const).map((mode) => (
+            {(['db', 'redis', 'batch'] as const).map((mode) => (
               <Box
                 key={mode}
                 onClick={() => setManagerMode(mode)}
@@ -182,8 +184,8 @@ const ConsolePage = () => {
                   whiteSpace: 'nowrap',
                 }}
               >
-                {mode === 'db' ? <StorageIcon sx={{ fontSize: 18 }} /> : <MemoryIcon sx={{ fontSize: 18 }} />}
-                {mode === 'db' ? 'DB Manager' : 'Redis Manager'}
+                {mode === 'db' ? <StorageIcon sx={{ fontSize: 18 }} /> : mode === 'redis' ? <MemoryIcon sx={{ fontSize: 18 }} /> : <TableRowsIcon sx={{ fontSize: 18 }} />}
+                {mode === 'db' ? 'DB Manager' : mode === 'redis' ? 'Redis Manager' : 'Batch Query'}
               </Box>
             ))}
           </Box>
@@ -332,6 +334,30 @@ const ConsolePage = () => {
                   </Grid>
                 )}
               </Grid>
+            </Box>
+
+            {/* Batch Query Manager View */}
+            <Box
+              key="batch-view"
+              sx={{
+                position: managerMode === 'batch' ? 'relative' : 'absolute',
+                inset: managerMode === 'batch' ? undefined : 0,
+                opacity: managerMode === 'batch' ? 1 : 0,
+                pointerEvents: managerMode === 'batch' ? 'auto' : 'none',
+                transition: 'opacity 0.3s ease',
+                flexGrow: managerMode === 'batch' ? 1 : undefined,
+                display: 'flex',
+                flexDirection: 'column',
+                overflow: 'hidden',
+                p: managerMode === 'batch' ? 0 : 2,
+              }}
+            >
+              <Box sx={{ overflowY: 'auto', flex: 1 }}>
+                <Stack spacing={2} sx={{ p: 1 }}>
+                  <DatabaseSelector onExecute={handleQueryExecute} compact />
+                  <CsvBatchPanel />
+                </Stack>
+              </Box>
             </Box>
           </Box>
         </Box>

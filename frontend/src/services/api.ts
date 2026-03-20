@@ -214,6 +214,41 @@ export const schemaAPI = {
   }
 };
 
+// CSV Batch API
+export const csvBatchAPI = {
+  start: async (request: {
+    queryTemplate: string;
+    ids: string[];
+    database: string;
+    pgSchema?: string;
+    batchSize?: number;
+    sleepMs?: number;
+    dryRun?: boolean;
+    stopOnError?: boolean;
+  }): Promise<{ executionId: string; totalIds: number; uniqueIds: number; totalBatches: number; status: string; message: string }> => {
+    const response = await api.post('/api/query/csv-batch', request);
+    return response.data;
+  },
+
+  getStatus: async (executionId: string): Promise<{
+    executionId: string;
+    status: 'running' | 'completed' | 'failed' | 'cancelled';
+    result?: { csvBatch?: any; [key: string]: any };
+    error?: string;
+    progress?: { currentStatement: number; totalStatements: number };
+    startTime: number;
+    endTime?: number;
+  }> => {
+    const response = await api.get(`/api/query/csv-batch/status/${executionId}`);
+    return response.data;
+  },
+
+  cancel: async (executionId: string): Promise<{ success: boolean; message: string }> => {
+    const response = await api.post(`/api/query/csv-batch/cancel/${executionId}`);
+    return response.data;
+  },
+};
+
 // Replication API
 export const replicationAPI = {
   addTables: async (params: {

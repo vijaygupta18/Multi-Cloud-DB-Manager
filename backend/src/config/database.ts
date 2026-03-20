@@ -35,7 +35,7 @@ const createPoolConfig = (dbConfig: DatabaseConfig | DatabaseInfo): PgPoolConfig
 };
 
 class DatabasePools {
-  private static instance: DatabasePools;
+  private static instance: DatabasePools | null = null;
 
   public history!: Pool;
 
@@ -175,7 +175,7 @@ class DatabasePools {
     if (!DatabasePools.instance) {
       DatabasePools.instance = new DatabasePools();
     }
-    return DatabasePools.instance;
+    return DatabasePools.instance!;
   }
 
   /**
@@ -263,6 +263,9 @@ class DatabasePools {
 
   public async shutdown() {
     logger.info('Shutting down database pools...');
+
+    // Reset singleton before ending pools so any post-shutdown getInstance() creates fresh pools
+    DatabasePools.instance = null;
 
     const shutdownPromises = Array.from(this.pools.values()).map(pool => pool.end());
     shutdownPromises.push(this.history.end());

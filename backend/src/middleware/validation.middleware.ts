@@ -52,6 +52,18 @@ export const redisScanSchema = z.object({
   scanCount: z.number().int().positive().max(200000).optional(),
 });
 
+// CSV batch query execution schema
+export const csvBatchSchema = z.object({
+  queryTemplate: z.string().min(1, 'Query template cannot be empty'),
+  ids: z.array(z.string()).min(1, 'IDs array cannot be empty').max(500000, 'Too many IDs (max 500,000)'),
+  database: z.string().min(1, 'Database name is required'),
+  batchSize: z.number().int().positive().max(10000).optional(),
+  sleepMs: z.number().int().nonnegative().max(60000).optional(),
+  dryRun: z.boolean().optional(),
+  stopOnError: z.boolean().optional(),
+  pgSchema: z.string().optional(),
+});
+
 // Query history filter schema
 export const queryHistorySchema = z.object({
   database: z.string().optional(), // Filter by database name
