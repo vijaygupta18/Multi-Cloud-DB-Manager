@@ -290,30 +290,57 @@ async function getKafkaQueueConfig(
     return null;
 }
 
-function getDefaultKafkaConfig(db: string, table: string, fallbackCfg: ClickHouseKafkaConfig): ExtractedKafkaConfig {
-    const cleanTable = table.replace(/_/g, '').replace(/\s+/g, '').toLowerCase();
-    if (db === 'atlas_app') {
+/**
+ * Derive Kafka config for a brand-new table by finding any sibling queue table
+ * in the same CH database and copying its broker/format, then substituting
+ * the old table slug in the topic and group names with the new one.
+ *
+ * Throws if no sibling queue is found — there is no fallback.
+ */
+async function getDefaultKafkaConfig(
+    chManager: ClickHouseClientManager,
+    db: string,
+    table: string,
+): Promise<ExtractedKafkaConfig> {
+    // Find any existing *_queue table in this database (exclude the current table's queue)
+    const siblingRows = await chManager.query<{ name: string }>(
+        `SELECT name FROM system.tables
+         WHERE database = '${db}'
+           AND name LIKE '%\_queue'
+           AND name != '${table}_queue'
+         LIMIT 10`,
+    );
+
+    for (const row of siblingRows) {
+        // Strip the '_queue' suffix to get the sibling table name
+        const siblingTable = row.name.replace(/_queue$/, '');
+        const siblingCfg = await getKafkaQueueConfig(chManager, db, siblingTable);
+        if (!siblingCfg) continue;
+
+        // Derive the sibling's "slug" from its topic name so we can replace it.
+        // Topics are expected to look like: <prefix>-<slug>  (e.g. aap-sessionizer-riderequest)
+        // We build the new table's slug the same way ClickHouse does: strip underscores.
+        const newSlug = table.replace(/_/g, '').toLowerCase();
+        const siblingSlug = siblingTable.replace(/_/g, '').toLowerCase();
+
+        const newTopic = siblingCfg.kafka_topic_list.replace(siblingSlug, newSlug);
+        const newGroup = siblingCfg.kafka_group_name.replace(siblingSlug, newSlug);
+
+        logger.info(
+            `CH sync: derived Kafka config for ${db}.${table} from sibling queue ${db}.${siblingTable}_queue`,
+        );
+
         return {
-            kafka_broker_list: 'eks-kurukshetra-kafka-3-e2e26d957f42486c.elb.ap-south-1.amazonaws.com:9096',
-            kafka_topic_list: `aap-sessionizer-${cleanTable}`,
-            kafka_group_name: `aap-sessionizer-${cleanTable}-ec2-ckh-consumer-v2`,
-            kafka_format: 'JSONEachRow',
-        };
-    } else if (db === 'atlas_driver_offer_bpp') {
-        return {
-            kafka_broker_list: 'eks-kurukshetra-kafka-3-e2e26d957f42486c.elb.ap-south-1.amazonaws.com:9096',
-            kafka_topic_list: `adob-sessionizer-${cleanTable}`,
-            kafka_group_name: `adob-sessionizer-${cleanTable}-ec2-ckh-consumer`,
-            kafka_format: 'JSONEachRow',
+            kafka_broker_list: siblingCfg.kafka_broker_list,
+            kafka_topic_list: newTopic,
+            kafka_group_name: newGroup,
+            kafka_format: siblingCfg.kafka_format,
         };
     }
-    
-    return {
-        kafka_broker_list: fallbackCfg.brokerList,
-        kafka_topic_list: ClickHouseDDLBuilder.topicName(db, table, fallbackCfg.topicMiddle),
-        kafka_group_name: ClickHouseDDLBuilder.groupName(db, table, fallbackCfg),
-        kafka_format: 'JSONEachRow'
-    };
+
+    throw new Error(
+        `CH sync: no sibling queue found in database '${db}' — cannot derive Kafka config for '${table}'`,
+    );
 }
 
 // ──────────────────────────────────────────────
@@ -342,7 +369,6 @@ export class ClickHouseSyncService {
 
         const { config } = chManager;
         const cluster = config.cluster;
-        const kafkaCfg = config.kafka;
         const selectUsers = config.selectUsers ?? [];
 
         // Parse each statement in the SQL (quote-aware split — respects semicolons inside string literals)
@@ -361,8 +387,8 @@ export class ClickHouseSyncService {
 
             try {
                 const result = parsed.kind === 'CREATE_TABLE'
-                    ? await this.handleCreateTable(parsed, pgPool, chManager, chDb, cluster, kafkaCfg, selectUsers)
-                    : await this.handleAlterAddColumn(parsed, pgPool, chManager, chDb, cluster, kafkaCfg, selectUsers);
+                    ? await this.handleCreateTable(parsed, pgPool, chManager, chDb, cluster, selectUsers)
+                    : await this.handleAlterAddColumn(parsed, pgPool, chManager, chDb, cluster, selectUsers);
                 results.push(result);
             } catch (err: any) {
                 logger.error('ClickHouse sync error', { stmt: stmt.slice(0, 100), error: err.message });
@@ -401,7 +427,6 @@ export class ClickHouseSyncService {
         ch: ClickHouseClientManager,
         chDb: string,
         cluster: string,
-        kafkaCfg: ClickHouseKafkaConfig,
         selectUsers: string[] = [],
     ): Promise<CHSyncResult> {
         const { schema, table } = parsed;
@@ -426,7 +451,7 @@ export class ClickHouseSyncService {
         await ch.exec(createTableDDL);
 
         // 3. Build and execute queue DDL
-        const queueConfig = getDefaultKafkaConfig(chDb, table, kafkaCfg);
+        const queueConfig = await getDefaultKafkaConfig(ch, chDb, table);
         const queueDDL = ClickHouseDDLBuilder.buildQueue(chDb, table, cluster, columns, queueConfig);
         logger.debug('CH CREATE QUEUE DDL', { ddl: queueDDL });
         await ch.exec(queueDDL);
@@ -464,7 +489,6 @@ export class ClickHouseSyncService {
         ch: ClickHouseClientManager,
         chDb: string,
         cluster: string,
-        kafkaCfg: ClickHouseKafkaConfig,
         selectUsers: string[] = [],
     ): Promise<CHSyncResult> {
         const { schema, table, columns: newColNames } = parsed;
@@ -491,7 +515,7 @@ export class ClickHouseSyncService {
             const allColumns = mapColumns(allPgRows);
             const createTableDDL = ClickHouseDDLBuilder.buildCreateTable(chDb, table, cluster, allColumns);
             await ch.exec(createTableDDL);
-            const queueConfig = getDefaultKafkaConfig(chDb, table, kafkaCfg);
+            const queueConfig = await getDefaultKafkaConfig(ch, chDb, table);
             const queueDDL = ClickHouseDDLBuilder.buildQueue(chDb, table, cluster, allColumns, queueConfig);
             await ch.exec(queueDDL);
             const mvDDL = ClickHouseDDLBuilder.buildMaterializedView(chDb, table, cluster, allColumns);
@@ -592,7 +616,7 @@ export class ClickHouseSyncService {
         logger.info(`CH sync: detected ${isPatternB ? 'Pattern B (JSONAsString)' : 'Pattern A (JSONEachRow)'} for ${table}_queue`);
 
         // 4b. Extract existing Kafka config before dropping
-        const existingKafkaConfig = await getKafkaQueueConfig(ch, chDb, table) || getDefaultKafkaConfig(chDb, table, kafkaCfg);
+        const existingKafkaConfig = await getKafkaQueueConfig(ch, chDb, table) || await getDefaultKafkaConfig(ch, chDb, table);
 
         // 5. DROP MV and Queue (order matters — MV first, queue second)
         const dropMvDDL = ClickHouseDDLBuilder.buildDropTable(chDb, `${table}_mv`, cluster);
