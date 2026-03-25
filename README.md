@@ -74,6 +74,20 @@ Managing PostgreSQL across AWS, GCP, or any cloud means juggling connections, cr
 | **Command validation** | Syntax checking and dangerous command blocking |
 | **Write history** | Full audit trail of all Redis write operations |
 
+### Migration Verifier
+
+| Feature | Description |
+|---------|-------------|
+| **Git diff analysis** | Extract SQL migration files between any two commits, tags, or branches |
+| **Auto-verification** | Verify each DDL statement against read-only replicas (CREATE TABLE, ADD/DROP COLUMN, indexes, constraints, NOT NULL, DEFAULT, TYPE changes) |
+| **Multi-database support** | Separate verification for BPP, BAP, Provider Dashboard, Rider Dashboard, Safety Dashboard |
+| **Smart categorization** | Group statements into ALTER (schema), ALTER NOT NULL, INSERT, UPDATE sections |
+| **Copy at every level** | Copy pending SQL per database, folder, file, or category with one click |
+| **Run on DB Manager** | Send selected queries directly to the DB Manager tab for execution |
+| **Export checklist** | Generate Markdown or Slack-formatted release checklists |
+| **Read-only safety** | Triple protection: read replica host + read-only DB user + pool-level `default_transaction_read_only=on` |
+| **Auto repo sync** | Init container clones repo; `git fetch` on page load with 5-min cooldown |
+
 ---
 
 ### User Management (MASTER only)
@@ -225,6 +239,8 @@ Create `backend/config/databases.json`:
 - **primary**: Your main cloud. Must have exactly one entry.
 - **secondary**: Array of additional clouds. Add as many as you need, or leave as `[]`.
 - **history**: Database where users and query audit trail are stored (can reuse an existing database).
+- **readReplicas** *(optional)*: Read-only replica endpoints for migration verification.
+- **migrations** *(optional)*: Git repo path and folder-to-database mapping for migration analysis.
 - Use `${ENV_VAR}` syntax for secrets — values are substituted from `.env` at startup.
 
 ### 2b. Configure Redis (optional)
@@ -456,6 +472,16 @@ kubectl apply -f k8s/
 | `GET` | `/api/schemas/configuration` | User | Full database + cloud configuration |
 | `GET` | `/api/schemas/:database?cloud=` | User | Schemas for a specific database |
 
+### Migration Verifier (`/api/migrations`)
+
+| Method | Endpoint | Auth | Description |
+|--------|----------|------|-------------|
+| `GET` | `/api/migrations/config` | User | Available environments, databases, path mappings |
+| `GET` | `/api/migrations/refs` | User | Recent git branches and tags for autocomplete |
+| `POST` | `/api/migrations/analyze` | User | Analyze SQL diff between two refs against read replica |
+| `GET` | `/api/migrations/file?ref=&path=` | User | Raw SQL content of a file at a git ref |
+| `POST` | `/api/migrations/refresh-repo` | User | Fetch latest changes from git remote |
+
 ### Health
 
 | Method | Endpoint | Auth | Description |
@@ -478,6 +504,7 @@ kubectl apply -f k8s/
 | **CORS** | Whitelist configured origins only |
 | **Query timeouts** | Configurable per-statement and overall timeouts |
 | **Blocked operations** | DROP/CREATE DATABASE/SCHEMA, GRANT/REVOKE, ALTER/CREATE/DROP ROLE/USER — blocked for all roles |
+| **Migration safety** | Read-only replicas + `default_transaction_read_only=on` + `execFileSync` (no shell injection) + path validation |
 
 ---
 
@@ -520,6 +547,7 @@ dual-db-manager/
 │   │   ├── middleware/              # Auth, validation, error handling
 │   │   ├── routes/                 # Express routes
 │   │   ├── services/               # Query execution, history, validation
+│   │   │   └── migrations/         # Git diff, SQL parser, DB verification
 │   │   ├── types/                  # TypeScript interfaces
 │   │   ├── utils/                  # Logger
 │   │   └── server.ts               # Entry point
@@ -531,6 +559,7 @@ dual-db-manager/
 │   │   │   ├── Dialog/             # Warning/confirmation dialogs
 │   │   │   ├── Editor/             # Monaco SQL editor
 │   │   │   ├── History/            # Query history sidebar
+│   │   │   ├── Migrations/         # Migration verifier (results, toolbar, summary, action bar)
 │   │   │   ├── Results/            # Multi-cloud results panel
 │   │   │   └── Selector/           # Database/schema/mode selector
 │   │   ├── hooks/                  # Auto-save hook

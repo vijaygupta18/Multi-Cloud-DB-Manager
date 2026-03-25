@@ -16,18 +16,33 @@ import { verifyStatement } from './verification.service';
 
 /**
  * Load migrations config from databases.json.
+ * Checks: 1) DATABASE_CONFIGS env var (base64), 2) k8s mount, 3) local file
  */
 function loadConfig(): { migrations: MigrationsConfig; environments: Record<string, MigrationEnvironmentConfig> } {
-  const candidates = [
-    '/config/databases.json',
-    path.join(__dirname, '../../../config/databases.json'),
-  ];
-
   let raw: string | null = null;
-  for (const p of candidates) {
-    if (fs.existsSync(p)) {
-      raw = fs.readFileSync(p, 'utf-8');
-      break;
+
+  // 1. Try DATABASE_CONFIGS environment variable (base64-encoded, used in k8s)
+  if (process.env.DATABASE_CONFIGS) {
+    try {
+      raw = Buffer.from(process.env.DATABASE_CONFIGS, 'base64').toString('utf-8');
+    } catch {
+      logger.warn('Failed to decode DATABASE_CONFIGS env var');
+    }
+  }
+
+  // 2. Try k8s mounted config file
+  if (!raw) {
+    const k8sPath = '/config/databases.json';
+    if (fs.existsSync(k8sPath)) {
+      raw = fs.readFileSync(k8sPath, 'utf-8');
+    }
+  }
+
+  // 3. Try local config file
+  if (!raw) {
+    const localPath = path.join(__dirname, '../../../config/databases.json');
+    if (fs.existsSync(localPath)) {
+      raw = fs.readFileSync(localPath, 'utf-8');
     }
   }
 
@@ -137,18 +152,24 @@ export async function analyze(
   }
 
   // 1. Get ALL changed files from git (no path scoping — we match against pathMapping)
-  const changedFiles = getChangedFiles(config.repoPath, undefined, fromRef, toRef);
+  const allChangedFiles = getChangedFiles(config.repoPath, undefined, fromRef, toRef);
 
-  const MAX_FILES = 500;
-  if (changedFiles.length > MAX_FILES) {
-    throw new Error(`Too many changed files (${changedFiles.length}). Maximum is ${MAX_FILES}. Use a narrower commit range.`);
+  // Filter to only files matching our configured migration paths
+  const changedFiles = allChangedFiles.filter(filePath =>
+    findPathMapping(filePath, config.pathMapping) !== null
+  );
+
+  const MAX_MIGRATION_FILES = 1000;
+  if (changedFiles.length > MAX_MIGRATION_FILES) {
+    throw new Error(`Too many migration files (${changedFiles.length}). Maximum is ${MAX_MIGRATION_FILES}. Use a narrower commit range.`);
   }
 
   logger.info('Migration analysis started', {
     fromRef,
     toRef,
     environment,
-    totalChangedFiles: changedFiles.length,
+    totalChangedFiles: allChangedFiles.length,
+    matchedMigrationFiles: changedFiles.length,
   });
 
   // 2. Process each file

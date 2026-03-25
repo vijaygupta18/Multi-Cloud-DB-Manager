@@ -32,6 +32,25 @@ spec:
       labels:
         app: dual-db-backend
     spec:
+      # Init container: clones the NammaYatri repo for migration verification
+      # Remove this block if you don't use the Migration Verifier feature
+      initContainers:
+      - name: clone-repo
+        image: alpine/git:latest
+        command:
+        - /bin/sh
+        - -c
+        - |
+          if [ -d /repos/nammayatri/.git ]; then
+            echo "Repo exists, fetching latest..."
+            cd /repos/nammayatri && git fetch --all --prune
+          else
+            echo "Cloning repo..."
+            git clone https://github.com/nammayatri/nammayatri.git /repos/nammayatri
+          fi
+        volumeMounts:
+        - name: repo-volume
+          mountPath: /repos
       containers:
       - name: backend
         image: <IMAGE_REGISTRY>/dual-db-backend:<TAG>  # Replace with your container image (e.g., docker.io/yourorg/dual-db-backend:v1.0.0)
@@ -105,7 +124,15 @@ spec:
 
         terminationMessagePath: /dev/termination-log
         terminationMessagePolicy: File
+        # Volume mount for migration repo (remove if not using Migration Verifier)
+        volumeMounts:
+        - name: repo-volume
+          mountPath: /repos
 
+      volumes:
+      - name: repo-volume
+        emptyDir:
+          sizeLimit: 5Gi
       dnsPolicy: ClusterFirst
       restartPolicy: Always
       schedulerName: default-scheduler

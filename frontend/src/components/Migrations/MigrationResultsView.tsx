@@ -743,8 +743,8 @@ const MigrationResultsView = () => {
     // Apply status filter
     if (statusFilter !== 'all') {
       if (statusFilter === 'pending') {
-        // "Pending" filter means show all actionable files (pending, partial, manual_check, error)
-        files = files.filter((f) => f.status !== 'applied');
+        // Show only files with pending or partial status (not manual_check)
+        files = files.filter((f) => f.status === 'pending' || f.status === 'partial');
       } else {
         files = files.filter((f) => f.status === statusFilter);
       }
