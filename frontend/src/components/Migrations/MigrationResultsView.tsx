@@ -21,7 +21,10 @@ import CheckBoxIcon from '@mui/icons-material/CheckBox';
 import FolderOpenIcon from '@mui/icons-material/FolderOpen';
 import InsertDriveFileIcon from '@mui/icons-material/InsertDriveFile';
 import StorageIcon from '@mui/icons-material/Storage';
+import PlayArrowIcon from '@mui/icons-material/PlayArrow';
+import UndoIcon from '@mui/icons-material/Undo';
 import { useMigrationsStore, makeKey } from '../../store/migrationsStore';
+import { useAppStore } from '../../store/appStore';
 import type { MigrationStatement, MigrationFileResult } from '../../types/migrations';
 import toast from 'react-hot-toast';
 
@@ -46,6 +49,24 @@ const DB_COLORS: Record<string, string> = {
 
 function getDbColor(db: string): string {
   return DB_COLORS[db] || '#546e7a';
+}
+
+/** Helper to send SQL to the DB Manager tab */
+function sendToDbManager(sql: string, count: number) {
+  if (!sql) {
+    toast('No pending statements');
+    return;
+  }
+  useAppStore.getState().setCurrentQuery(sql);
+  useAppStore.getState().setManagerMode('db');
+  toast.success(`${count} statement(s) loaded into DB Manager`);
+}
+
+/** Collect pending SQL from a list of statements */
+function getPendingSQL(statements: MigrationStatement[]): { sql: string; count: number } {
+  const pending = statements.filter(s => s.status === 'pending');
+  const sql = pending.map(s => s.sql).filter(Boolean).join(';\n\n');
+  return { sql, count: pending.length };
 }
 
 interface StatementCategory {
@@ -119,13 +140,13 @@ const StatementCard = React.memo(({ stmt, originalIndex, filePath, isPending }: 
   const toggleStatement = useMigrationsStore((s) => s.toggleStatement);
   const key = makeKey(filePath, originalIndex);
   const isSelected = selectedStatements.has(key);
-
   const handleCopy = () => {
     if (stmt.sql) {
       navigator.clipboard.writeText(stmt.sql);
       toast.success('SQL copied');
     }
   };
+
 
   return (
     <Paper
@@ -253,6 +274,12 @@ const CategoryGroup = React.memo(({ category, statements, filePath }: {
     selectAllInCategory(filePath, pendingStatements.map(s => s.originalIndex));
   };
 
+  const handleRunOnDbManager = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const sql = pendingStatements.map(s => s.stmt.sql).filter(Boolean).join(';\n\n');
+    sendToDbManager(sql, pendingCount);
+  };
+
   return (
     <Box sx={{ mb: 1 }}>
       <Box
@@ -299,6 +326,15 @@ const CategoryGroup = React.memo(({ category, statements, filePath }: {
               sx={{ fontSize: '0.68rem', minWidth: 0, py: 0, textTransform: 'none' }}
             >
               Copy
+            </Button>
+            <Button
+              size="small"
+              color="success"
+              startIcon={<PlayArrowIcon sx={{ fontSize: 12 }} />}
+              onClick={handleRunOnDbManager}
+              sx={{ fontSize: '0.68rem', minWidth: 0, py: 0, textTransform: 'none' }}
+            >
+              Run
             </Button>
           </>
         )}
@@ -349,6 +385,12 @@ const FileSection = React.memo(({ file }: { file: MigrationFileResult }) => {
   const handleSelectAll = (e: React.MouseEvent) => {
     e.stopPropagation();
     selectAllInFile(file.path);
+  };
+
+  const handleRunOnDbManager = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const { sql, count } = getPendingSQL(file.statements);
+    sendToDbManager(sql, count);
   };
 
   return (
@@ -407,6 +449,16 @@ const FileSection = React.memo(({ file }: { file: MigrationFileResult }) => {
               sx={{ fontSize: '0.68rem', minWidth: 0, py: 0, textTransform: 'none' }}
             >
               Copy File
+            </Button>
+            <Button
+              size="small"
+              variant="outlined"
+              color="success"
+              startIcon={<PlayArrowIcon sx={{ fontSize: 12 }} />}
+              onClick={handleRunOnDbManager}
+              sx={{ fontSize: '0.68rem', minWidth: 0, py: 0, textTransform: 'none' }}
+            >
+              Run
             </Button>
           </>
         )}
@@ -477,6 +529,13 @@ const FolderSection = React.memo(({ label, files }: {
     }
   };
 
+  const handleRunOnDbManager = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const allStatements = files.flatMap(f => f.statements);
+    const { sql, count } = getPendingSQL(allStatements);
+    sendToDbManager(sql, count);
+  };
+
   return (
     <Box sx={{ mb: 1.5, ml: 1.5 }}>
       <Box
@@ -503,15 +562,27 @@ const FolderSection = React.memo(({ label, files }: {
         )}
         <Box sx={{ flex: 1 }} />
         {pendingCount > 0 && (
-          <Button
-            size="small"
-            variant="outlined"
-            startIcon={<ContentCopyIcon sx={{ fontSize: 12 }} />}
-            onClick={handleCopyFolder}
-            sx={{ fontSize: '0.68rem', minWidth: 0, py: 0, textTransform: 'none' }}
-          >
-            Copy Folder
-          </Button>
+          <>
+            <Button
+              size="small"
+              variant="outlined"
+              startIcon={<ContentCopyIcon sx={{ fontSize: 12 }} />}
+              onClick={handleCopyFolder}
+              sx={{ fontSize: '0.68rem', minWidth: 0, py: 0, textTransform: 'none' }}
+            >
+              Copy Folder
+            </Button>
+            <Button
+              size="small"
+              variant="outlined"
+              color="success"
+              startIcon={<PlayArrowIcon sx={{ fontSize: 12 }} />}
+              onClick={handleRunOnDbManager}
+              sx={{ fontSize: '0.68rem', minWidth: 0, py: 0, textTransform: 'none' }}
+            >
+              Run
+            </Button>
+          </>
         )}
         <IconButton size="small" sx={{ p: 0 }}>
           {expanded ? <KeyboardArrowUpIcon sx={{ fontSize: 16 }} /> : <KeyboardArrowDownIcon sx={{ fontSize: 16 }} />}
@@ -571,6 +642,13 @@ const DatabaseSection = React.memo(({ database, files }: {
     }
   };
 
+  const handleRunOnDbManager = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const allStatements = files.flatMap(f => f.statements);
+    const { sql, count } = getPendingSQL(allStatements);
+    sendToDbManager(sql, count);
+  };
+
   return (
     <Paper
       elevation={2}
@@ -604,15 +682,27 @@ const DatabaseSection = React.memo(({ database, files }: {
         )}
         <Box sx={{ flex: 1 }} />
         {pendingCount > 0 && (
-          <Button
-            size="small"
-            variant="outlined"
-            startIcon={<ContentCopyIcon sx={{ fontSize: 14 }} />}
-            onClick={handleCopyDb}
-            sx={{ fontSize: '0.72rem', textTransform: 'none', borderColor: color, color }}
-          >
-            Copy All {database}
-          </Button>
+          <>
+            <Button
+              size="small"
+              variant="outlined"
+              startIcon={<ContentCopyIcon sx={{ fontSize: 14 }} />}
+              onClick={handleCopyDb}
+              sx={{ fontSize: '0.72rem', textTransform: 'none', borderColor: color, color }}
+            >
+              Copy All {database}
+            </Button>
+            <Button
+              size="small"
+              variant="outlined"
+              color="success"
+              startIcon={<PlayArrowIcon sx={{ fontSize: 14 }} />}
+              onClick={handleRunOnDbManager}
+              sx={{ fontSize: '0.72rem', textTransform: 'none' }}
+            >
+              Run
+            </Button>
+          </>
         )}
         <IconButton size="small" sx={{ p: 0 }}>
           {expanded ? <KeyboardArrowUpIcon /> : <KeyboardArrowDownIcon />}

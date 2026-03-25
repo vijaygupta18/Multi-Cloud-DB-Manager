@@ -18,6 +18,9 @@ RUN npm run build
 # Production stage
 FROM node:18-alpine
 
+# Install git for migration verification feature
+RUN apk add --no-cache git
+
 WORKDIR /app
 
 # Copy package files

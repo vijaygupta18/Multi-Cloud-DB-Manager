@@ -65,6 +65,11 @@ export function classifyStatement(sql: string, defaultSchema: string): ParsedSta
 
   const upper = clean.toUpperCase();
 
+  // -- DO $$ blocks and CREATE [OR REPLACE] FUNCTION — treat as opaque procedural code --
+  if (/^\s*DO\s+\$/i.test(clean) || /^\s*CREATE\s+(?:OR\s+REPLACE\s+)?FUNCTION/i.test(clean)) {
+    return { sql, type: 'OTHER', operation: 'UNKNOWN', objectName: 'manual_check' };
+  }
+
   // -- CREATE TABLE --
   const createTableMatch = clean.match(
     /CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?("?[a-zA-Z_][a-zA-Z0-9_]*"?(?:\s*\.\s*"?[a-zA-Z_][a-zA-Z0-9_]*"?)?)/i

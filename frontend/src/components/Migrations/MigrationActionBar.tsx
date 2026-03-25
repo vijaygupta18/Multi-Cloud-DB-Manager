@@ -1,8 +1,10 @@
 import React from 'react';
 import { Paper, Stack, Typography, Button, Slide } from '@mui/material';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
+import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import CheckBoxOutlineBlankIcon from '@mui/icons-material/CheckBoxOutlineBlank';
 import { useMigrationsStore } from '../../store/migrationsStore';
+import { useAppStore } from '../../store/appStore';
 import toast from 'react-hot-toast';
 
 const MigrationActionBar = () => {
@@ -20,6 +22,17 @@ const MigrationActionBar = () => {
       navigator.clipboard.writeText(sql);
       toast.success(`Copied ${selectedCount} selected statement(s)`);
     }
+  };
+
+  const handleRunOnDbManager = () => {
+    const sql = getSelectedSQL();
+    if (!sql) {
+      toast('No statements selected');
+      return;
+    }
+    useAppStore.getState().setCurrentQuery(sql);
+    useAppStore.getState().setManagerMode('db');
+    toast.success(`${selectedCount} statement(s) loaded into DB Manager`);
   };
 
   return (
@@ -52,6 +65,15 @@ const MigrationActionBar = () => {
             onClick={handleCopy}
           >
             Copy Selected
+          </Button>
+          <Button
+            size="small"
+            variant="contained"
+            color="success"
+            startIcon={<PlayArrowIcon sx={{ fontSize: 14 }} />}
+            onClick={handleRunOnDbManager}
+          >
+            Run on DB Manager
           </Button>
           <Button
             size="small"

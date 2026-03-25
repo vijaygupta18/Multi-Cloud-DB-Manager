@@ -4,6 +4,115 @@ import { MigrationStatement } from '../../types/migrations';
 import { ParsedStatement } from './sql-parser.service';
 
 /**
+ * Generate a rollback SQL statement for a given forward SQL statement.
+ * Returns undefined if rollback cannot be auto-generated.
+ */
+function generateRollback(parsed: ParsedStatement): string | undefined {
+  const { operation, objectName, sql } = parsed;
+
+  switch (operation) {
+    case 'CREATE TABLE': {
+      // objectName: schema.table
+      return `DROP TABLE IF EXISTS ${objectName};`;
+    }
+
+    case 'ADD COLUMN': {
+      // objectName: schema.table.column
+      const parts = objectName.split('.');
+      if (parts.length < 3) return undefined;
+      const [schema, table, column] = parts;
+      return `ALTER TABLE ${schema}.${table} DROP COLUMN IF EXISTS ${column};`;
+    }
+
+    case 'DROP COLUMN': {
+      return `-- Cannot auto-rollback DROP COLUMN (data lost)`;
+    }
+
+    case 'ALTER COLUMN':
+    case 'ALTER COLUMN TYPE': {
+      const upper = sql.toUpperCase();
+
+      if (upper.includes('SET NOT NULL')) {
+        const parts = objectName.split('.');
+        if (parts.length < 3) return undefined;
+        const [schema, table, column] = parts;
+        return `ALTER TABLE ${schema}.${table} ALTER COLUMN ${column} DROP NOT NULL;`;
+      }
+
+      if (upper.includes('DROP NOT NULL')) {
+        const parts = objectName.split('.');
+        if (parts.length < 3) return undefined;
+        const [schema, table, column] = parts;
+        return `ALTER TABLE ${schema}.${table} ALTER COLUMN ${column} SET NOT NULL;`;
+      }
+
+      if (upper.includes('SET DEFAULT')) {
+        const parts = objectName.split('.');
+        if (parts.length < 3) return undefined;
+        const [schema, table, column] = parts;
+        return `ALTER TABLE ${schema}.${table} ALTER COLUMN ${column} DROP DEFAULT;`;
+      }
+
+      if (upper.includes('DROP DEFAULT')) {
+        return `-- Cannot auto-rollback DROP DEFAULT (original value unknown)`;
+      }
+
+      if (operation === 'ALTER COLUMN TYPE') {
+        return `-- Cannot auto-rollback TYPE change (original type unknown)`;
+      }
+
+      return undefined;
+    }
+
+    case 'CREATE INDEX': {
+      // objectName: schema.indexname
+      return `DROP INDEX IF EXISTS ${objectName};`;
+    }
+
+    case 'DROP INDEX': {
+      return `-- Cannot auto-rollback DROP INDEX (definition unknown)`;
+    }
+
+    case 'CREATE TYPE': {
+      // objectName: schema.typename
+      return `DROP TYPE IF EXISTS ${objectName};`;
+    }
+
+    case 'ALTER TYPE ADD VALUE': {
+      return `-- Cannot remove enum values in PostgreSQL`;
+    }
+
+    case 'ADD CONSTRAINT': {
+      // objectName: schema.table/constraintName
+      const slashIdx = objectName.indexOf('/');
+      if (slashIdx === -1) return undefined;
+      const qualifiedTable = objectName.substring(0, slashIdx);
+      const constraintName = objectName.substring(slashIdx + 1);
+      return `ALTER TABLE ${qualifiedTable} DROP CONSTRAINT IF EXISTS ${constraintName};`;
+    }
+
+    case 'DROP CONSTRAINT': {
+      return `-- Cannot auto-rollback DROP CONSTRAINT (definition unknown)`;
+    }
+
+    case 'INSERT': {
+      return `-- Cannot auto-rollback INSERT (need primary key)`;
+    }
+
+    case 'UPDATE': {
+      return `-- Cannot auto-rollback UPDATE (original values unknown)`;
+    }
+
+    case 'DELETE': {
+      return `-- Cannot auto-rollback DELETE (original rows unknown)`;
+    }
+
+    default:
+      return undefined;
+  }
+}
+
+/**
  * Verify whether a single parsed SQL statement has been applied to the database.
  * Uses only parameterized queries against information_schema / pg_catalog.
  */
@@ -12,6 +121,7 @@ export async function verifyStatement(
   parsed: ParsedStatement,
   defaultSchema: string
 ): Promise<MigrationStatement> {
+  const rollbackSql = generateRollback(parsed);
   const base: MigrationStatement = {
     sql: parsed.sql,
     type: parsed.type,
@@ -19,6 +129,7 @@ export async function verifyStatement(
     objectName: parsed.objectName,
     status: 'manual_check',
     details: '',
+    rollbackSql,
   };
 
   // Skip non-verifiable operations

@@ -6,6 +6,7 @@ export interface MigrationStatement {
   status: 'applied' | 'pending' | 'manual_check' | 'error' | 'skipped';
   details: string;
   verificationQuery?: string;
+  rollbackSql?: string;
 }
 
 export interface MigrationFileResult {

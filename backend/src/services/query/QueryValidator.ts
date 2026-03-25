@@ -293,11 +293,6 @@ export class QueryValidator {
     const trimmed = current.trim();
     if (trimmed) statements.push(trimmed);
 
-    // Fallback: if nothing was split, return the whole query as one statement
-    if (statements.length === 0 && query.trim()) {
-      statements.push(query.trim());
-    }
-
     return statements;
   }
 }

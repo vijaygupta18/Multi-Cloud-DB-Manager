@@ -90,9 +90,9 @@ interface AppState {
 
 export const useAppStore = create<AppState>((set, get) => ({
   // Manager mode
-  managerMode: loadPersistedStringSetting('managerMode', 'db') as 'db' | 'redis' | 'batch' | 'migrations',
+  managerMode: (sessionStorage.getItem('managerMode') as 'db' | 'redis' | 'batch' | 'migrations') || 'db',
   setManagerMode: (mode) => {
-    savePersistedStringSetting('managerMode', mode);
+    sessionStorage.setItem('managerMode', mode);
     set({ managerMode: mode });
   },
 
