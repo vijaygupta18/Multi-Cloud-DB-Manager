@@ -165,8 +165,8 @@ class RedisManagerService {
     }
 
     // Check write permissions
-    if (isWriteCommand(command) && userRole === 'READER') {
-      throw new Error('READER role cannot execute write commands');
+    if (isWriteCommand(command) && (userRole === 'READER' || userRole === 'CKH_MANAGER')) {
+      throw new Error(`${userRole} role cannot execute Redis write commands`);
     }
 
     const id = uuidv4();
@@ -224,8 +224,8 @@ class RedisManagerService {
     }
 
     // Check delete permissions
-    if (action === 'delete' && userRole === 'READER') {
-      throw new Error('READER role cannot delete keys');
+    if (action === 'delete' && (userRole === 'READER' || userRole === 'CKH_MANAGER')) {
+      throw new Error(`${userRole} role cannot delete keys`);
     }
 
     const executionId = uuidv4();

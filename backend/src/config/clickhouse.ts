@@ -70,6 +70,20 @@ class ClickHouseClientManager {
     }
 
     /**
+     * Run a SELECT and return rows + column metadata.
+     * Used by the user-facing query endpoint where the UI needs column names/types.
+     */
+    public async queryWithMeta(query: string): Promise<{
+        rows: Array<Record<string, unknown>>;
+        meta: Array<{ name: string; type: string }>;
+    }> {
+        logger.debug('CH queryWithMeta:', { query: query.slice(0, 200) });
+        const result = await this.client.query({ query, format: 'JSON' });
+        const json = await result.json<any>();
+        return { rows: json.data ?? [], meta: json.meta ?? [] };
+    }
+
+    /**
      * Ping ClickHouse — returns true if reachable.
      */
     public async ping(): Promise<boolean> {

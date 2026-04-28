@@ -1,4 +1,5 @@
 import { QueryResult } from 'pg';
+import { Role } from '../constants/roles';
 
 export interface User {
   id: string;
@@ -7,7 +8,7 @@ export interface User {
   picture?: string;
   created_at: Date;
   last_login?: Date;
-  role?: string;
+  role?: Role;
   is_active?: boolean;
 }
 
@@ -218,7 +219,7 @@ declare global {
       email: string;
       name: string;
       picture?: string;
-      role?: string;
+      role?: Role;
     }
   }
 }

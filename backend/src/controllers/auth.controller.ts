@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from 'express';
 import bcrypt from 'bcryptjs';
 import logger from '../utils/logger';
 import DatabasePools from '../config/database';
+import { ALL_ROLES } from '../constants/roles';
 
 export const getCurrentUser = (req: Request, res: Response) => {
   if (!req.user) {
@@ -67,7 +68,7 @@ export const deactivateUsers = async (req: Request, res: Response) => {
 export const changeUserRole = async (req: Request, res: Response) => {
   try {
     const { username, role } = req.body;
-    if (!username || !role || !['MASTER', 'USER', 'READER'].includes(role) || username === 'master') {
+    if (!username || !role || !(ALL_ROLES as string[]).includes(role) || username === 'master') {
       return res.status(400).json({ error: 'Invalid input or cannot change master role' });
     }
     const dbPools = DatabasePools.getInstance();

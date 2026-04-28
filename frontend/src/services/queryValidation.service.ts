@@ -1,3 +1,5 @@
+import type { Role } from '../constants/roles';
+
 export interface ValidationWarning {
   type: 'danger' | 'warning';
   title: string;
@@ -9,11 +11,11 @@ export interface ValidationWarning {
 /**
  * Detects dangerous SQL queries that could cause data loss
  * @param query - SQL query to validate
- * @param userRole - Current user's role (MASTER, USER, READER)
+ * @param userRole - Current user's role
  */
 export const detectDangerousQueries = (
   query: string,
-  userRole?: 'MASTER' | 'USER' | 'READER'
+  userRole?: Role
 ): ValidationWarning | null => {
   // Normalize query: remove comments and extra whitespace
   const normalizedQuery = query

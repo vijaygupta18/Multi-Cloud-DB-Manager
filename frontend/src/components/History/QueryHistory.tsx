@@ -38,7 +38,12 @@ interface UserOption {
   name: string;
 }
 
-const QueryHistory = () => {
+interface QueryHistoryProps {
+  /** When set, locks the database filter and hides the dropdown. */
+  database?: string;
+}
+
+const QueryHistory = ({ database }: QueryHistoryProps = {}) => {
   const user = useAppStore(s => s.user);
   const queryHistory = useAppStore(s => s.queryHistory);
   const setQueryHistory = useAppStore(s => s.setQueryHistory);
@@ -112,8 +117,9 @@ const QueryHistory = () => {
     setLoading(true);
     try {
       const offset = (currentPage - 1) * ITEMS_PER_PAGE;
+      const effectiveDb = database ?? (filter === 'all' ? undefined : filter);
       const history = await historyAPI.getHistory({
-        database: filter === 'all' ? undefined : filter,
+        database: effectiveDb,
         user_id: isMaster && userFilter !== 'all' ? userFilter : undefined,
         success:
           statusFilter === 'all'
@@ -212,21 +218,23 @@ const QueryHistory = () => {
 
         {/* Filters */}
         <Stack direction="row" spacing={2} sx={{ mt: 2 }}>
-          <TextField
-            select
-            size="small"
-            label="Database"
-            value={filter}
-            onChange={(e) => setFilter(e.target.value)}
-            sx={{ minWidth: 150 }}
-          >
-            <MenuItem value="all">All Databases</MenuItem>
-            {databases.map((db) => (
-              <MenuItem key={db.name} value={db.name}>
-                {db.label}
-              </MenuItem>
-            ))}
-          </TextField>
+          {!database && (
+            <TextField
+              select
+              size="small"
+              label="Database"
+              value={filter}
+              onChange={(e) => setFilter(e.target.value)}
+              sx={{ minWidth: 150 }}
+            >
+              <MenuItem value="all">All Databases</MenuItem>
+              {databases.map((db) => (
+                <MenuItem key={db.name} value={db.name}>
+                  {db.label}
+                </MenuItem>
+              ))}
+            </TextField>
+          )}
 
           <TextField
             select
