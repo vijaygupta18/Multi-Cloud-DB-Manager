@@ -22,7 +22,9 @@ import StorageIcon from '@mui/icons-material/Storage';
 import MemoryIcon from '@mui/icons-material/Memory';
 import TableRowsIcon from '@mui/icons-material/TableRows';
 import CompareArrowsIcon from '@mui/icons-material/CompareArrows';
+import HubIcon from '@mui/icons-material/Hub';
 import { authAPI, schemaAPI } from '../services/api';
+import { Role } from '../constants/roles';
 import { useAppStore } from '../store/appStore';
 import toast from 'react-hot-toast';
 import SQLEditor from '../components/Editor/SQLEditor';
@@ -33,6 +35,7 @@ import RedisCommandForm from '../components/Redis/RedisCommandForm';
 import RedisResultsPanel from '../components/Redis/RedisResultsPanel';
 import RedisCacheClearer from '../components/Redis/RedisCacheClearer';
 import RedisHistory from '../components/Redis/RedisHistory';
+import ClickhouseToolbar from '../components/Clickhouse/ClickhouseToolbar';
 import CsvBatchPanel from '../components/CsvBatch/CsvBatchPanel';
 import MigrationToolbar from '../components/Migrations/MigrationToolbar';
 import MigrationSummaryBar from '../components/Migrations/MigrationSummaryBar';
@@ -44,18 +47,26 @@ import type { QueryResponse, RedisCommandResponse } from '../types';
 import CircularProgress from '@mui/material/CircularProgress';
 import LinearProgress from '@mui/material/LinearProgress';
 
-type ManagerMode = 'db' | 'redis' | 'batch' | 'migrations';
+type ManagerMode = 'db' | 'redis' | 'batch' | 'migrations' | 'clickhouse';
 
-const TAB_CONFIG: Array<{ mode: ManagerMode; label: string; icon: React.ReactNode }> = [
-  { mode: 'db', label: 'DB Manager', icon: <StorageIcon sx={{ fontSize: 18 }} /> },
-  { mode: 'redis', label: 'Redis Manager', icon: <MemoryIcon sx={{ fontSize: 18 }} /> },
-  { mode: 'batch', label: 'Batch Query', icon: <TableRowsIcon sx={{ fontSize: 18 }} /> },
-  { mode: 'migrations', label: 'Migrations', icon: <CompareArrowsIcon sx={{ fontSize: 18 }} /> },
+// Roles that see the standard manager tabs (DB / Redis / Batch / Migrations).
+const NON_CH_ROLES: Role[] = [Role.MASTER, Role.USER, Role.READER];
+
+const TAB_CONFIG: Array<{ mode: ManagerMode; label: string; icon: React.ReactNode; visibleTo: Role[] }> = [
+  { mode: 'db', label: 'DB Manager', icon: <StorageIcon sx={{ fontSize: 18 }} />, visibleTo: NON_CH_ROLES },
+  { mode: 'redis', label: 'Redis Manager', icon: <MemoryIcon sx={{ fontSize: 18 }} />, visibleTo: NON_CH_ROLES },
+  { mode: 'batch', label: 'Batch Query', icon: <TableRowsIcon sx={{ fontSize: 18 }} />, visibleTo: NON_CH_ROLES },
+  { mode: 'migrations', label: 'Migrations', icon: <CompareArrowsIcon sx={{ fontSize: 18 }} />, visibleTo: NON_CH_ROLES },
+  { mode: 'clickhouse', label: 'Clickhouse Manager', icon: <HubIcon sx={{ fontSize: 18 }} />, visibleTo: [Role.MASTER, Role.CKH_MANAGER] },
 ];
 
-const PillToggle = ({ managerMode, setManagerMode }: { managerMode: ManagerMode; setManagerMode: (m: ManagerMode) => void }) => {
+const tabsForRole = (role: Role | undefined) =>
+  role ? TAB_CONFIG.filter((t) => t.visibleTo.includes(role)) : [];
+
+const PillToggle = ({ managerMode, setManagerMode, userRole }: { managerMode: ManagerMode; setManagerMode: (m: ManagerMode) => void; userRole: Role }) => {
   const tabRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const [indicator, setIndicator] = useState({ left: 3, width: 0 });
+  const visibleTabs = tabsForRole(userRole);
 
   useEffect(() => {
     const el = tabRefs.current[managerMode];
@@ -98,7 +109,7 @@ const PillToggle = ({ managerMode, setManagerMode }: { managerMode: ManagerMode;
           transition: 'left 0.3s cubic-bezier(0.4, 0, 0.2, 1), width 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
         }}
       />
-      {TAB_CONFIG.map((tab) => (
+      {visibleTabs.map((tab) => (
         <Box
           key={tab.mode}
           ref={(el: HTMLDivElement | null) => { tabRefs.current[tab.mode] = el; }}
@@ -229,15 +240,24 @@ const ConsolePage = () => {
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
   const [currentResult, setCurrentResult] = useState<QueryResponse | null>(null);
   const [redisResult, setRedisResult] = useState<RedisCommandResponse | null>(null);
+  const [clickhouseResult, setClickhouseResult] = useState<QueryResponse | null>(null);
   const [refreshingConfig, setRefreshingConfig] = useState(false);
   const resultsPanelRef = useRef<HTMLDivElement>(null);
   const redisResultsPanelRef = useRef<HTMLDivElement>(null);
+  const clickhouseResultsPanelRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    // Check authentication
+    // Check authentication. Snap managerMode to a role-allowed tab BEFORE
+    // setUser fires, so the first render with a non-null user already has the
+    // correct active tab. This avoids briefly mounting tabs the user can't
+    // see (e.g. CKH_MANAGER landing on the persisted 'db' default).
     const checkAuth = async () => {
       try {
         const currentUser = await authAPI.getCurrentUser();
+        const allowed = tabsForRole(currentUser.role);
+        if (allowed.length && !allowed.some((t) => t.mode === managerMode)) {
+          setManagerMode(allowed[0].mode);
+        }
         setUser(currentUser);
       } catch (error) {
         navigate('/login');
@@ -245,7 +265,19 @@ const ConsolePage = () => {
     };
 
     checkAuth();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Safety net: if the active tab ever becomes hidden for the current role
+  // (e.g. devtools-edited sessionStorage), snap to the first allowed tab.
+  useEffect(() => {
+    if (!user) return;
+    const allowed = tabsForRole(user.role);
+    if (allowed.length === 0) return;
+    if (!allowed.some((t) => t.mode === managerMode)) {
+      setManagerMode(allowed[0].mode);
+    }
+  }, [user, managerMode, setManagerMode]);
 
   const handleLogout = async () => {
     try {
@@ -303,9 +335,28 @@ const ConsolePage = () => {
     }, 200);
   }, []);
 
+  const handleClickhouseExecute = useCallback((result: QueryResponse) => {
+    setClickhouseResult(result);
+    setTimeout(() => {
+      clickhouseResultsPanelRef.current?.scrollIntoView({
+        behavior: 'smooth',
+        block: 'start',
+        inline: 'nearest',
+      });
+    }, 200);
+  }, []);
+
   if (!user) {
     return <Box>Loading...</Box>;
   }
+
+  // Role-aware panel visibility. Panels not allowed for the current role are
+  // not mounted at all — avoids running their mount-time effects (e.g. config
+  // fetches in DatabaseSelector, git ref loads in MigrationsContent) for users
+  // that have no business there. Allowed but inactive panels stay mounted so
+  // the existing opacity-driven tab transitions preserve their internal state.
+  const canSee = (mode: ManagerMode) =>
+    TAB_CONFIG.find((t) => t.mode === mode)?.visibleTo.includes(user.role) ?? false;
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', height: '100vh' }}>
@@ -313,13 +364,17 @@ const ConsolePage = () => {
       <AppBar position="static" elevation={2}>
         <Toolbar>
           <Typography variant="h6" component="div" noWrap>
-            {managerMode === 'db' ? 'Multi-Cloud DB Manager' : managerMode === 'redis' ? 'Redis Manager' : managerMode === 'batch' ? 'Batch Query Manager' : 'DB Migration Verifier'}
+            {managerMode === 'db' ? 'Multi-Cloud DB Manager'
+              : managerMode === 'redis' ? 'Redis Manager'
+              : managerMode === 'batch' ? 'Batch Query Manager'
+              : managerMode === 'clickhouse' ? 'Clickhouse Manager'
+              : 'DB Migration Verifier'}
           </Typography>
 
           <Box sx={{ flexGrow: 1 }} />
 
           {/* Smooth pill toggle — auto-width based on content */}
-          <PillToggle managerMode={managerMode} setManagerMode={setManagerMode} />
+          <PillToggle managerMode={managerMode} setManagerMode={setManagerMode} userRole={user.role} />
 
           <Box sx={{ flexGrow: 1 }} />
 
@@ -390,6 +445,7 @@ const ConsolePage = () => {
         <Box sx={{ flexGrow: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
           <Box sx={{ p: 2, height: '100%', display: 'flex', flexDirection: 'column', position: 'relative' }}>
             {/* DB Manager View */}
+            {canSee('db') && (
             <Box
               key="db-view"
               sx={{
@@ -428,8 +484,10 @@ const ConsolePage = () => {
                 )}
               </Grid>
             </Box>
+            )}
 
             {/* Redis Manager View */}
+            {canSee('redis') && (
             <Box
               key="redis-view"
               sx={{
@@ -466,8 +524,10 @@ const ConsolePage = () => {
                 )}
               </Grid>
             </Box>
+            )}
 
             {/* Batch Query Manager View */}
+            {canSee('batch') && (
             <Box
               key="batch-view"
               sx={{
@@ -490,8 +550,10 @@ const ConsolePage = () => {
                 </Stack>
               </Box>
             </Box>
+            )}
 
             {/* DB Migrations View */}
+            {canSee('migrations') && (
             <Box
               key="migrations-view"
               sx={{
@@ -509,6 +571,49 @@ const ConsolePage = () => {
             >
               <MigrationsContent />
             </Box>
+            )}
+
+            {/* Clickhouse Manager View */}
+            {canSee('clickhouse') && (
+            <Box
+              key="clickhouse-view"
+              sx={{
+                position: managerMode === 'clickhouse' ? 'relative' : 'absolute',
+                inset: managerMode === 'clickhouse' ? undefined : 0,
+                opacity: managerMode === 'clickhouse' ? 1 : 0,
+                pointerEvents: managerMode === 'clickhouse' ? 'auto' : 'none',
+                transition: 'opacity 0.3s ease',
+                flexGrow: managerMode === 'clickhouse' ? 1 : undefined,
+                display: 'flex',
+                flexDirection: 'column',
+                overflow: 'hidden',
+                p: managerMode === 'clickhouse' ? 0 : 2,
+              }}
+            >
+              <Grid container spacing={2} sx={{ flexGrow: 1, overflow: 'hidden' }}>
+                <Grid item xs={12} md={showHistory ? 8 : 12} sx={{ height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+                  <Box sx={{ overflowY: 'auto', flex: 1 }}>
+                    <Stack spacing={2} sx={{ p: 1 }}>
+                      <ClickhouseToolbar onExecute={handleClickhouseExecute} />
+                      <Box sx={{ height: '400px' }}>
+                        <SQLEditor />
+                      </Box>
+                      {clickhouseResult && (
+                        <Box ref={clickhouseResultsPanelRef}>
+                          <ResultsPanel result={clickhouseResult} />
+                        </Box>
+                      )}
+                    </Stack>
+                  </Box>
+                </Grid>
+                {showHistory && (
+                  <Grid item xs={12} md={4} sx={{ height: '100%' }}>
+                    <QueryHistory database="clickhouse" />
+                  </Grid>
+                )}
+              </Grid>
+            </Box>
+            )}
           </Box>
         </Box>
       </Box>

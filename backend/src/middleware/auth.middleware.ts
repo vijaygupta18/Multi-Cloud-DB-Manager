@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import logger from '../utils/logger';
+import { Role } from '../constants/roles';
 
 /**
  * Middleware to check if user is authenticated
@@ -23,34 +24,43 @@ export const isAuthenticated = (req: Request, res: Response, next: NextFunction)
 };
 
 /**
- * Middleware to check if user has MASTER role
- * Must be used after isAuthenticated
+ * Factory: gate a route to one or more roles.
+ * Must be used after isAuthenticated.
  */
-export const requireMaster = (req: Request, res: Response, next: NextFunction) => {
-  const user = req.user as any;
+export const requireRoles =
+  (...roles: Role[]) =>
+  (req: Request, res: Response, next: NextFunction) => {
+    const user = req.user as Express.User | undefined;
 
-  if (!user || user.role !== 'MASTER') {
-    logger.warn('Unauthorized MASTER access attempt', {
-      username: user?.username,
-      role: user?.role,
-      path: req.path,
-    });
+    if (!user?.role || !roles.includes(user.role)) {
+      logger.warn('Unauthorized role access attempt', {
+        username: user?.username,
+        role: user?.role,
+        required: roles,
+        path: req.path,
+      });
 
-    return res.status(403).json({
-      error: 'Forbidden',
-      message: 'Only MASTER can perform this action',
-    });
-  }
+      return res.status(403).json({
+        error: 'Forbidden',
+        message: `Requires one of: ${roles.join(', ')}`,
+      });
+    }
 
-  next();
-};
+    next();
+  };
+
+/**
+ * Middleware to check if user has MASTER role.
+ * Alias for requireRoles(Role.MASTER) — kept for clarity at call sites.
+ */
+export const requireMaster = requireRoles(Role.MASTER);
 
 /**
  * Middleware to check if user can execute write queries
  * MASTER and USER can write, READER cannot
  */
 export const canWrite = (req: Request, res: Response, next: NextFunction) => {
-  const user = req.user as any;
+  const user = req.user as Express.User | undefined;
 
   if (!user) {
     return res.status(401).json({
@@ -73,7 +83,7 @@ export const canWrite = (req: Request, res: Response, next: NextFunction) => {
  * READER cannot execute write commands or delete via SCAN
  */
 export const validateRedisPermissions = (req: Request, res: Response, next: NextFunction) => {
-  const user = req.user as any;
+  const user = req.user as Express.User | undefined;
 
   if (!user) {
     return res.status(401).json({ error: 'Unauthorized' });
@@ -91,6 +101,15 @@ export const validateRedisPermissions = (req: Request, res: Response, next: Next
     return res.status(403).json({
       error: 'Forbidden',
       message: 'Only MASTER role can execute raw Redis commands',
+    });
+  }
+
+  // CKH_MANAGER currently has no Redis access.
+  // To grant read-only later: remove this branch and extend the READER block below.
+  if (user.role === Role.CKH_MANAGER) {
+    return res.status(403).json({
+      error: 'Forbidden',
+      message: 'CKH_MANAGER does not have Redis access',
     });
   }
 
@@ -143,7 +162,7 @@ export const validateRedisPermissions = (req: Request, res: Response, next: Next
  * MASTER: All queries (no restrictions)
  */
 export const validateQueryPermissions = (req: Request, res: Response, next: NextFunction) => {
-  const user = req.user as any;
+  const user = req.user as Express.User | undefined;
   const { query } = req.body;
 
   if (!user || !query) {
@@ -159,6 +178,20 @@ export const validateQueryPermissions = (req: Request, res: Response, next: Next
       query: query.substring(0, 100),
     });
     return next();
+  }
+
+  // CKH_MANAGER currently has no Postgres access.
+  // To grant SELECT-only later: remove this branch and extend the READER block below
+  // to also accept Role.CKH_MANAGER.
+  if (user.role === Role.CKH_MANAGER) {
+    logger.warn('CKH_MANAGER attempted Postgres query', {
+      username: user.username,
+      query: query.substring(0, 100),
+    });
+    return res.status(403).json({
+      error: 'Forbidden',
+      message: 'CKH_MANAGER does not have Postgres access',
+    });
   }
 
   // For USER: Only allow specific operations

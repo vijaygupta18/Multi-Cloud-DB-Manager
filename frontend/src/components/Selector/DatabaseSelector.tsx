@@ -420,12 +420,21 @@ const DatabaseSelector = ({ onExecute, compact = false }: DatabaseSelectorProps)
     await executeQueryInternal(password);
   };
 
-  // Register execute handler on store ref so Monaco keybinding can call it
+  // Register execute handler on store ref so Monaco keybinding can call it.
+  // Gated on managerMode: this component is rendered in both the DB and Batch
+  // panels, so we own the slot only when one of those is active. Identity-
+  // checked cleanup avoids clobbering a sibling that has already reclaimed.
   const executeRef = useAppStore(s => s.executeRef);
+  const managerMode = useAppStore(s => s.managerMode);
   useEffect(() => {
+    if (managerMode !== 'db' && managerMode !== 'batch') return;
     executeRef.current = handleExecute;
-    return () => { executeRef.current = null; };
-  }, [handleExecute, executeRef]);
+    return () => {
+      if (executeRef.current === handleExecute) {
+        executeRef.current = null;
+      }
+    };
+  }, [handleExecute, executeRef, managerMode]);
 
   const handleCancelWarning = () => {
     setShowWarningDialog(false);
