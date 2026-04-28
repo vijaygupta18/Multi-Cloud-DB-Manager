@@ -64,6 +64,11 @@ export const csvBatchSchema = z.object({
   pgSchema: z.string().optional(),
 });
 
+// ClickHouse ad-hoc query schema
+export const clickhouseQuerySchema = z.object({
+  query: z.string().min(1, 'Query cannot be empty'),
+});
+
 // Query history filter schema
 export const queryHistorySchema = z.object({
   database: z.string().optional(), // Filter by database name

@@ -1,6 +1,7 @@
 import axios from 'axios';
 import toast from 'react-hot-toast';
 import type { User, QueryRequest, QueryResponse, QueryExecution, HistoryFilter, DatabaseConfiguration } from '../types';
+import type { Role } from '../constants/roles';
 
 // @ts-ignore - runtime config loaded from /config.js
 const backendUrl = window.__APP_CONFIG__?.BACKEND_URL;
@@ -82,7 +83,7 @@ export const authAPI = {
     await api.post('/api/auth/deactivate', { usernames: [username] });
   },
 
-  changeRole: async (username: string, role: 'MASTER' | 'USER' | 'READER'): Promise<void> => {
+  changeRole: async (username: string, role: Role): Promise<void> => {
     await api.post('/api/auth/change-role', { username, role });
   },
 
@@ -304,6 +305,24 @@ export const redisAPI = {
   getHistory: async (filter?: { limit?: number; offset?: number; user_id?: string }): Promise<any[]> => {
     const response = await api.get('/api/redis/history', { params: filter });
     return response.data.data;
+  },
+};
+
+// ClickHouse API
+export const clickhouseAPI = {
+  getStatus: async (): Promise<{ status: string; clickhouse: string; host?: string; database?: string; message?: string }> => {
+    const response = await api.get('/api/clickhouse/status');
+    return response.data;
+  },
+
+  executeQuery: async (query: string): Promise<QueryResponse> => {
+    const response = await api.post('/api/clickhouse/query', { query });
+    return response.data;
+  },
+
+  sync: async (sql: string, database: string, schema?: string): Promise<any> => {
+    const response = await api.post('/api/clickhouse/sync', { sql, database, schema });
+    return response.data;
   },
 };
 

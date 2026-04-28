@@ -29,13 +29,14 @@ import { authAPI } from '../services/api';
 import { useAppStore } from '../store/appStore';
 import toast from 'react-hot-toast';
 import { format } from 'date-fns';
+import { Role, ALL_ROLES } from '../constants/roles';
 
 interface UserData {
   id: number;
   username: string;
   email: string;
   name: string;
-  role: 'MASTER' | 'USER' | 'READER';
+  role: Role;
   is_active: boolean;
   created_at: string;
 }
@@ -125,7 +126,7 @@ const UsersPage = () => {
       return;
     }
     try {
-      await authAPI.changeRole(username, newRole as 'MASTER' | 'USER' | 'READER');
+      await authAPI.changeRole(username, newRole as Role);
       toast.success(`User ${username} role changed to ${newRole}`);
       await fetchUsers();
     } catch (error) {
@@ -241,14 +242,14 @@ const UsersPage = () => {
                       {userData.username === 'master' ? (
                         <Chip label={userData.role} color="error" size="small" />
                       ) : (
-                        <FormControl size="small" sx={{ minWidth: 100 }}>
+                        <FormControl size="small" sx={{ minWidth: 140 }}>
                           <Select
                             value={userData.role}
                             onChange={(e) => handleRoleChange(userData.username, e.target.value)}
                           >
-                            <MenuItem value="MASTER">MASTER</MenuItem>
-                            <MenuItem value="USER">USER</MenuItem>
-                            <MenuItem value="READER">READER</MenuItem>
+                            {ALL_ROLES.map((r) => (
+                              <MenuItem key={r} value={r}>{r}</MenuItem>
+                            ))}
                           </Select>
                         </FormControl>
                       )}

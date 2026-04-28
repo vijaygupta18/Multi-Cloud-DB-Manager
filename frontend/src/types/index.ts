@@ -1,9 +1,11 @@
+import type { Role } from '../constants/roles';
+
 export interface User {
   id: string; // Aligned with backend (UUID)
   username: string;
   email: string;
   name: string;
-  role: 'MASTER' | 'USER' | 'READER';
+  role: Role;
   picture?: string;
 }
 
