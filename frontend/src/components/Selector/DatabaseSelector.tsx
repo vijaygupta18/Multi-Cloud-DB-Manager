@@ -374,7 +374,11 @@ const DatabaseSelector = ({ onExecute, compact = false }: DatabaseSelectorProps)
         setExecutionProgress(null);
         return;
       }
-      toast.error(errMsg || 'Failed to execute query');
+      // Toast is already shown by the axios interceptor in api.ts;
+      // only fall back here if the response carried no error payload.
+      if (!errMsg) {
+        toast.error('Failed to execute query');
+      }
       setIsExecuting(false);
       setCurrentExecutionId(null);
       setExecutionProgress(null);
