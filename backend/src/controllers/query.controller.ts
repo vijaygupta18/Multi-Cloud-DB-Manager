@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import queryService from '../services/query.service';
+import QueryValidator from '../services/query/QueryValidator';
 import historyService from '../services/history.service';
 import DatabasePools from '../config/database';
 import logger from '../utils/logger';
@@ -80,6 +81,19 @@ export const executeQuery = async (
 
     if (queryRequest.mode !== 'both' && !allClouds.includes(queryRequest.mode)) {
       throw new AppError(`Invalid execution mode: ${queryRequest.mode}`, 400);
+    }
+
+    // INSERT may only run against the primary cloud — DB-level replication
+    // carries the row to secondaries. Block 'both' and any secondary-cloud target.
+    if (queryRequest.mode !== cloudConfig.primaryCloud) {
+      const statements = QueryValidator.splitStatements(queryRequest.query);
+      const hasInsert = statements.some(s => /^\s*(?:WITH\b[\s\S]*?\)\s*)?INSERT\b/i.test(s));
+      if (hasInsert) {
+        throw new AppError(
+          `INSERT statements are only allowed on the primary cloud (${cloudConfig.primaryCloud}). Please switch the execution mode to ${cloudConfig.primaryCloud}.`,
+          400
+        );
+      }
     }
 
     // Hard-block CREATE INDEX on protected tables — no override
