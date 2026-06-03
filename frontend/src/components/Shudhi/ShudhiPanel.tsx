@@ -137,13 +137,11 @@ const ShudhiPanel = () => {
   }, [selectedService]);
 
   // Load keys when service or pod changes.
-  // Require a pod: fetching keys for a whole service (no pod) returns the entire
-  // key set (tens of MB) and is never what the user wants on first render.
+  // An empty selectedPod means "All pods" (a valid selection) — pass undefined so
+  // the backend returns keys across all pods. The panel is lazy-mounted (only when
+  // its tab is opened), so this no longer fires on initial page load.
   useEffect(() => {
-    if (!selectedService || !selectedPod) {
-      setKeys([]);
-      return;
-    }
+    if (!selectedService) return;
 
     const loadKeys = async () => {
       setLoadingKeys(true);
